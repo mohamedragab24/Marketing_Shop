@@ -23,8 +23,10 @@ function readState() {
     const user=saved?.user||null, accounts=saved?.accounts||{};
     if(user?.role) { user.active ??= true; accounts[user.role]=user; }
     for(const account of Object.values(accounts)) if(account) account.active ??= true;
-    return { products:Array.isArray(saved?.products) ? saved.products : demoProducts, cart:saved?.cart || {}, orders:saved?.orders || [], user, accounts, plans:saved?.plans || [], favorites:saved?.favorites || [] };
-  } catch { return { products:demoProducts, cart:{}, orders:[], user:null, accounts:{}, plans:[], favorites:[] }; }
+    const productCategories = (Array.isArray(saved?.products) ? saved.products : demoProducts).map((p)=>p.category).filter(Boolean);
+    const categories = Array.isArray(saved?.categories) && saved.categories.length ? saved.categories : [...new Set(['إلكترونيات','أزياء','المنزل','رياضة','قرطاسية',...productCategories])].map((name,index)=>({id:`cat-${index}-${uid()}`,name,icon:['✦','◈','⌂','◌','✎'][index%5],visible:true}));
+    return { products:Array.isArray(saved?.products) ? saved.products : demoProducts, categories, cart:saved?.cart || {}, orders:saved?.orders || [], user, accounts, plans:saved?.plans || [], favorites:saved?.favorites || [] };
+  } catch { return { products:demoProducts, categories:['إلكترونيات','أزياء','المنزل','رياضة','قرطاسية'].map((name,index)=>({id:`cat-default-${index}`,name,icon:['✦','◈','⌂','◌','✎'][index],visible:true})), cart:{}, orders:[], user:null, accounts:{}, plans:[], favorites:[] }; }
 }
 let data = readState();
 let timer, query = '', categoryFilter = '', selectedFiles = [];
@@ -80,7 +82,7 @@ function productCard(p) {
 function productList(products) { return products.length?`<div class="product-grid">${products.map(productCard).join('')}</div>`:'<div class="empty-state">لا توجد نتائج الآن. جرّب كلمة أخرى أو اختر قسمًا مختلفًا.</div>'; }
 function storePage() {
   const all = data.products.filter(isProductVisible);
-  const categories = [...new Set(all.map((p)=>p.category).filter(Boolean))];
+  const categories = [...new Map([...(data.categories||[]).filter((c)=>c.visible!==false).map((c)=>[c.name,c]), ...all.map((p)=>[p.category,{name:p.category,visible:true}])]).values()].map((c)=>c.name).filter(Boolean);
   const shown = all.filter((p)=>(!categoryFilter||p.category===categoryFilter)&&(!query||`${p.name} ${p.category} ${p.brand}`.toLocaleLowerCase('ar').includes(query.toLocaleLowerCase('ar'))));
   return `<section class="store-hero"><div class="hero-blob hero-blob-one"></div><div class="hero-blob hero-blob-two"></div><div class="hero-copy"><span class="eyebrow"><i></i> اختيارات يومية، تجربة أسهل</span><h1>كل اللي بتحبه،<br><em>في مكان واحد.</em></h1><p>اكتشف منتجات مميزة من بائعين مستقلين، وجرّب رحلة الشراء خطوة بخطوة.</p><div class="hero-buttons"><a class="button button-primary" href="#catalog">اكتشف المنتجات <span>←</span></a><a class="text-link" href="/seller.html#seller">عندك منتج؟ ابدأ البيع</a></div><div class="hero-proof"><span>✦</span><div><b>${all.length} منتجات معروضة</b><small>تجربة متجر محلية بلا دفع حقيقي</small></div></div></div><div class="hero-showcase"><div class="showcase-card showcase-back">✦ <small>منتجات مختارة</small><b>كل يوم، اكتشاف جديد</b></div><div class="showcase-orbit"></div><div class="showcase-product">👜</div><div class="showcase-tag">اختيار الأسبوع <b>♡</b></div><div class="showcase-note"><span>✳</span><div><b>اختاري براحتك</b><small>السلة والطلبات تجريبية</small></div></div></div></section>
   <main class="page-wrap"><section class="benefit-strip"><div><span>♧</span><b>تسوّق مريح</b><small>استكشف الأقسام بسهولة</small></div><div><span>✧</span><b>تجربة آمنة</b><small>لا توجد عمليات دفع فعلية</small></div><div><span>↗</span><b>دعم البائعين</b><small>منتجات من متاجر مستقلة</small></div></section>
@@ -170,7 +172,59 @@ function campaignText(p) {
   const audience=category==='إلكترونيات'?'الأشخاص المهتمون بالتقنية والاستخدام اليومي':category==='أزياء'?'المهتمون بالموضة العملية والاختيارات اليومية':category==='المنزل'?'الأسر ومحبو ترتيب المساحات المنزلية':`المهتمون بفئة ${category} والتسوق عبر الهاتف`;
   const keywords=[...new Set([name,category,p.brand,`شراء ${category}`,'تسوق أونلاين'].filter(Boolean))].join('، ');
   const priceIdea=price?`${cash(Math.round(price*.95))} إلى ${cash(Math.round(price*1.08))} كتجربة اختبارية فقط، بعد حساب التكلفة وهامش الربح.`:'أضف السعر والتكلفة ثم قارِن بثلاثة منتجات مشابهة قبل تحديد السعر.';
-  return `خطة تسويق تجريبية — ${name}\n━━━━━━━━━━━━━━━━━━━━\n\n01 | الجمهور المقترح\n${audience}. اختبر الفئة على منشورين مختلفين، ولا تعتبرها نتيجة بحث سوق حقيقية.\n\n02 | الرسالة والعنوان\n${name} — اختيار عملي ليومك\n${cleanText(p.description)||'أظهر الفائدة المؤكدة للمنتج مع صورة واضحة ومعلومة عملية.'}\n\n03 | السعر\n${priceIdea}\n\n04 | كلمات البحث (SEO)\n${keywords}\nأضف اسم العلامة أو المقاس إن كان مؤكدًا، ولا تستخدم ادعاءات غير موثّقة.\n\n05 | نصوص جاهزة للتعديل\n• وصل ${name} — شاهد التفاصيل واختر اللي يناسبك.\n• بتدور على ${category}؟ تعرّف على ${name} ومواصفاته.\n• لقطة قريبة + معلومة واحدة مؤكدة + رابط صفحة المنتج.\n\n06 | خطوات العمل خلال 30 يومًا\nالأسبوع 1: راجع الصورة والعنوان والوصف، واطلب من شخصين قراءة الصفحة.\nالأسبوع 2: انشر مقطعين قصيرين يوضحان الاستخدام الحقيقي بدون مبالغة.\nالأسبوع 3: جرّب عرضًا محدود المدة بعد حساب هامش الربح وتكلفة الشحن.\nالأسبوع 4: قارن المشاهدات والنقرات والطلبات التجريبية، وكرّر المحتوى الأوضح.\n\n07 | جدول نشر أسبوعي مقترح\nالسبت: صورة المنتج + فائدة واحدة.\nالاثنين: إجابة سؤال شائع عن المقاس أو الاستخدام.\nالأربعاء: فيديو قصير يوضح التفاصيل الواقعية.\nالجمعة: تذكير بالعروض أو رابط صفحة المنتج.\n\n08 | مؤشرات للمتابعة\nنسبة النقر إلى صفحة المنتج · الإضافة للسلة · اكتمال الطلب · رسائل الاستفسار. دوّن الأرقام الفعلية أسبوعيًا ولا تفترض أن التفاعل يساوي المبيعات.\n\n⚠ هذه اقتراحات عامة محلية وليست تحليلًا لبيانات السوق أو ضمانًا للمبيعات.`;
+  return `خطة إطلاق وتسويق احترافية — ${name}
+━━━━━━━━━━━━━━━━━━━━
+
+01 | الهدف خلال 30 يومًا
+إطلاق صفحة منتج واضحة، بناء ثقة أولية، اختبار 3 رسائل إعلانية، وتحويل الزيارات إلى إضافة للسلة ثم طلب. لا تعتبر التقديرات ضمانًا للمبيعات.
+
+02 | الجمهور والتموضع
+${audience}. التموضع المقترح: ${name} كحل عملي واضح الفائدة، بصور واقعية وسعر معلن ومعلومات مؤكدة.
+
+03 | الرسالة الرئيسية
+${name} — اختيار عملي ليومك
+${cleanText(p.description)||'أظهر الفائدة المؤكدة للمنتج مع صورة واضحة ومعلومة عملية.'}
+الدعوة للإجراء: اكتشف التفاصيل · أضف للسلة · اسأل عن المقاس/الاستخدام.
+
+04 | تجهيز صفحة المنتج قبل الإعلان
+• 4 صور: أمامية، تفاصيل قريبة، الحجم في سياق الاستخدام، ومحتويات العبوة.
+• عنوان يتضمن نوع المنتج والفائدة الأساسية.
+• 5 مواصفات مؤكدة + سياسة إرجاع مختصرة + مخزون محدث.
+• اختبار الصفحة على الهاتف وفتح الرابط من شخصين مستقلين.
+
+05 | السعر والعرض
+${priceIdea}
+ابدأ بعرض محدود أو شحن محفّز فقط بعد حساب التكلفة والهامش؛ لا تستخدم خصمًا وهميًا.
+
+06 | SEO وكلمات البحث
+${keywords}
+أضف اسم العلامة أو المقاس إن كان مؤكدًا، واكتب وصفًا فريدًا لا يكرر ادعاءات غير موثقة.
+
+07 | خطة القنوات
+إنستغرام: صورة Carousel من 4 شرائح + Reel قصير 3 مرات أسبوعيًا.
+فيسبوك: منشور فائدة + سؤال شائع + رابط صفحة المنتج مرتين أسبوعيًا.
+تيك توك/ريلز: فيديو 10–20 ثانية يوضح الاستخدام الحقيقي دون مبالغة.
+واتساب: رسالة إطلاق مختصرة للأشخاص الذين وافقوا على استقبال العروض فقط.
+Google/SEO: عنوان صفحة واضح، وصف مختصر، وكلمات بحث مرتبطة بالنية الشرائية.
+
+08 | نصوص إعلانية جاهزة للتعديل
+إعلان 1 — وعي: بتدور على ${category} عملي؟ تعرّف على ${name} وشوف التفاصيل بنفسك.
+إعلان 2 — فائدة: ${cleanText(p.description)||'تفاصيل واضحة وتصميم عملي للاستخدام اليومي.'} اضغط لاكتشاف المنتج.
+إعلان 3 — تحويل: ${name} متاح الآن. راجع الصور والمواصفات ثم أضفه للسلة إذا ناسبك.
+عنوان قصير: اختيار عملي بدون تعقيد
+وصف زر: اكتشف المنتج الآن
+
+09 | جدول 30 يومًا
+الأيام 1–3: صور ووصف وقياس سرعة الصفحة وتثبيت رابط واحد.
+الأيام 4–7: نشر 3 قطع محتوى عضوي واختبار عنوانين.
+الأسبوع 2: تشغيل اختبار صغير لرسالتين وصورتين؛ أوقف ما لا يحقق نقرات مؤهلة.
+الأسبوع 3: نشر تجربة استخدام/أسئلة شائعة وتحديث صفحة المنتج.
+الأسبوع 4: مقارنة النقرات والإضافات للسلة والطلبات، ثم إعادة إنتاج أفضل صيغة.
+
+10 | مؤشرات المتابعة
+الوصول · نسبة النقر · زيارات صفحة المنتج · إضافة للسلة · بدء الطلب · الطلبات المكتملة · تكلفة الحصول على عميل. سجّل المصدر والتاريخ ولا تخلط التفاعل بالمبيعات.
+
+⚠ هذه خطة إرشادية محلية وليست تحليلًا لبيانات السوق أو ضمانًا للمبيعات. راجع القوانين وسياسات كل منصة قبل النشر.`;
 }
 function renderCampaignResult(product) {
   $('#campaign-result').innerHTML=`<div class="result-card"><div class="result-head"><div><span class="section-kicker">اقتراح جاهز للتعديل</span><h2>خطة ${esc(product.name)}</h2></div><span class="result-spark">✦</span></div><textarea id="campaign-text" rows="23" aria-label="خطة التسويق المقترحة">${esc(campaignText(product))}</textarea><div class="result-actions"><button class="button button-primary" data-act="copy-campaign">نسخ الخطة</button><button class="button button-outline" data-act="save-campaign" ${data.user?.role==='seller'?'':'disabled'}>حفظها في تجاربك</button></div><p class="fine-print">الخطة نص إرشادي تجريبي؛ راجع البيانات والادعاءات والأسعار قبل النشر.</p></div>`;
@@ -181,7 +235,7 @@ function databasePage() {
 }
 function campaignPage() {
   const own=data.user?.role==='seller'?data.products.filter((p)=>p.sellerId===data.user.id):[];
-  return `<main class="page-wrap campaign-page"><section class="campaign-hero"><div><span class="eyebrow"><i></i> استوديو نمو المتجر</span><h1>سوّق بذكاء.<br><em>خطوة بخطوة.</em></h1><p>حوّل معلومات منتجك إلى خطة محتوى قابلة للتنفيذ. عدّل الاقتراحات قبل استخدامها.</p></div><div class="campaign-badge"><span>✦</span><b>خطة عملية<br>بـ 30 يومًا</b></div></section><div class="campaign-layout"><form id="campaign-form" class="form-card campaign-form"><div class="form-section-heading"><span>✦</span><div><h2>من أين نبدأ؟</h2><p>أدخل تفاصيل منتجك للحصول على اقتراحات مناسبة.</p></div></div>${own.length?`<label>اختر من منتجات متجرك<select name="productId"><option value="">اختيار منتج…</option>${own.map((p)=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>`:''}<label>اسم المنتج<input name="name" placeholder="مثال: حقيبة يومية" required></label><label>الفئة<input name="category" placeholder="مثال: أزياء" required></label><div class="form-grid campaign-inputs"><label>السعر بالجنيه<input type="number" name="price" min="0" placeholder="اختياري"></label><label>العلامة التجارية<input name="brand" placeholder="اختياري"></label></div><label>ما الفائدة الأساسية للعميل؟<textarea name="description" rows="3" placeholder="اكتب فائدة أو ميزة مؤكدة"></textarea></label><button class="button button-primary button-full">أنشئ خطة التسويق <span>✦</span></button><p class="fine-print">مولّد اقتراحات محلي تجريبي — لا يتصل بخدمة ذكاء اصطناعي خارجية ولا يضمن نتائج البيع.</p></form><section id="campaign-result" class="campaign-result"><div class="result-placeholder"><span>✦</span><h2>خطتك تبدأ من هنا</h2><p>أكمل بيانات منتجك واضغط «أنشئ خطة التسويق» لتظهر خطة المحتوى والخطوات المقترحة.</p><div><i>01 تحديد الجمهور</i><i>02 كتابة المحتوى</i><i>03 متابعة النتائج</i></div></div></section></div></main>`;
+  return `<main class="page-wrap campaign-page"><section class="campaign-hero"><div><span class="eyebrow"><i></i> استوديو نمو المتجر</span><h1>أطلق منتجك.<br><em>بخطة واضحة.</em></h1><p>خطة احترافية من التجهيز إلى الإعلان والمتابعة، مع نصوص جاهزة ومواد بصرية قابلة للتنزيل.</p></div><div class="campaign-badge"><span>✦</span><b>إطلاق عملي<br>بـ 30 يومًا</b></div></section><div class="campaign-layout"><form id="campaign-form" class="form-card campaign-form"><div class="form-section-heading"><span>01</span><div><h2>بيانات الحملة</h2><p>أدخل تفاصيل المنتج لبناء الخطة والمواد.</p></div></div>${own.length?`<label>اختر من منتجات متجرك<select name="productId"><option value="">اختيار منتج…</option>${own.map((p)=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>`:''}<label>اسم المنتج<input name="name" placeholder="مثال: حقيبة يومية" required></label><label>الفئة<input name="category" placeholder="مثال: أزياء" required></label><div class="form-grid campaign-inputs"><label>السعر بالجنيه<input type="number" name="price" min="0" placeholder="اختياري"></label><label>العلامة التجارية<input name="brand" placeholder="اختياري"></label></div><label>ما الفائدة الأساسية للعميل؟<textarea name="description" rows="3" placeholder="اكتب فائدة أو ميزة مؤكدة"></textarea></label><button class="button button-primary button-full">أنشئ الخطة والمواد <span>✦</span></button><p class="fine-print">المحتوى إرشادي محلي؛ راجع الادعاءات والأسعار وسياسات الإعلانات قبل النشر.</p></form><section id="campaign-result" class="campaign-result"><div class="result-placeholder"><span>✦</span><h2>خطتك تبدأ من هنا</h2><p>ستظهر هنا خطة الإطلاق، نصوص القنوات، وجدول 30 يومًا.</p><div><i>خطة إطلاق</i><i>إعلانات متعددة</i><i>مواد بصرية</i></div></div></section></div><section id="creative-studio" class="creative-studio"><div class="studio-heading"><div><span class="section-kicker">03 · Creative Studio</span><h2>صانع المواد البصرية والإعلانية</h2><p>استخدم صورة منتجك أو بطاقة تصميم جاهزة، ثم نزّل المقاس المناسب لكل قناة.</p></div><span class="studio-note">Instagram · Facebook · TikTok · WhatsApp</span></div><div class="creative-grid"><div class="creative-preview"><canvas id="creative-canvas" width="1080" height="1080"></canvas><div class="creative-actions"><button class="button button-primary" data-act="download-creative">تنزيل الصورة</button><button class="button button-outline" data-act="copy-ad">نسخ نص الإعلان</button></div></div><form id="creative-form" class="form-card creative-form"><label>العنوان على التصميم<input name="headline" value="اختيار عملي ليومك" maxlength="44"></label><label>النص المختصر<textarea name="subline" rows="3">تفاصيل واضحة. تجربة أسهل. اكتشف المنتج الآن.</textarea></label><label>المقاس<select name="size"><option value="1080x1080">منشور مربع 1080×1080</option><option value="1080x1350">منشور طولي 1080×1350</option><option value="1080x1920">ستوري / ريلز 1080×1920</option></select></label><label>اللون<select name="theme"><option value="mint">نعناع هادئ</option><option value="navy">كحلي احترافي</option><option value="peach">خوخي دافئ</option></select></label><button type="button" class="button button-outline" data-act="render-creative">تحديث المعاينة</button><p class="fine-print">تُستخدم صورة المنتج الأولى إن وُجدت؛ وإلا تظهر بطاقة تصميم نصية يمكن تنزيلها.</p></form></div></section></main>`;
 }
 const views={store:storePage,login:demoLogin,cart:cartPage,orders:ordersPage,profile:profilePage,database:databasePage,favorites:()=>`<main class="page-wrap"><div class="section-heading"><h1>مفضلتي</h1><p>المنتجات التي حفظتها أثناء هذه التجربة.</p></div>${productList(data.products.filter((p)=>data.favorites.includes(p.id)))}</main>`,marketing:campaignPage,seller:sellerDashboard,newproduct:productForm};
 function render() {
@@ -207,6 +261,15 @@ function productValues(form) {
   out.price=Number(out.price||0);out.discountPrice=Number(out.discountPrice||0);out.stock=Number(out.stock||0);
   out.keywords=(out.keywords||'').split(/[،,]/).map(cleanText).filter(Boolean);out.status=fd.has('publish')?'published':'draft';return out;
 }
+function renderCreative() {
+  const canvas=$('#creative-canvas'), form=$('#creative-form'); if(!canvas||!form)return;
+  const size=String(form.elements.size.value||'1080x1080').split('x').map(Number); canvas.width=size[0]; canvas.height=size[1];
+  const ctx=canvas.getContext('2d'), theme=form.elements.theme.value||'mint', colors={mint:['#eef8f1','#0e7565','#183d49'],navy:['#183d49','#8de0c1','#ffffff'],peach:['#fff1e3','#b76842','#3e2d2b']}[theme];
+  ctx.fillStyle=colors[0];ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle=colors[1];ctx.globalAlpha=.16;ctx.beginPath();ctx.arc(canvas.width*.84,canvas.height*.18,canvas.width*.32,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+  const p=window.lastCampaignProduct, image=p?.images?.[0]; const drawText=()=>{ctx.fillStyle=colors[2];ctx.direction='rtl';ctx.textAlign='right';ctx.font=`800 ${Math.max(34,canvas.width*.065)}px Tajawal, Arial`;ctx.fillText(form.elements.headline.value,canvas.width*.9,canvas.height*.72);ctx.font=`400 ${Math.max(20,canvas.width*.032)}px Tajawal, Arial`;const words=form.elements.subline.value.split(' ');let line='',y=canvas.height*.79;for(const word of words){const test=line+word+' ';if(ctx.measureText(test).width>canvas.width*.7){ctx.fillText(line,canvas.width*.9,y);line=word+' ';y+=Math.max(29,canvas.width*.043);}else line=test;}if(line)ctx.fillText(line,canvas.width*.9,y);ctx.font=`700 ${Math.max(18,canvas.width*.025)}px Tajawal, Arial`;ctx.fillStyle=colors[1];ctx.fillText('سوقنا · اكتشف الآن',canvas.width*.9,canvas.height*.92);};
+  if(image){const im=new Image();im.onload=()=>{const box={x:canvas.width*.1,y:canvas.height*.08,w:canvas.width*.8,h:canvas.height*.55},scale=Math.min(box.w/im.width,box.h/im.height),w=im.width*scale,h=im.height*scale;ctx.save();ctx.beginPath();ctx.roundRect(box.x,box.y,box.w,box.h,canvas.width*.04);ctx.clip();ctx.fillStyle='#fff';ctx.fillRect(box.x,box.y,box.w,box.h);ctx.drawImage(im,box.x+(box.w-w)/2,box.y+(box.h-h)/2,w,h);ctx.restore();drawText();};im.src=image;}else{ctx.fillStyle='#fff';ctx.beginPath();ctx.roundRect(canvas.width*.1,canvas.height*.08,canvas.width*.8,canvas.height*.55,canvas.width*.04);ctx.fill();ctx.fillStyle=colors[1];ctx.font=`800 ${canvas.width*.16}px Arial`;ctx.textAlign='center';ctx.fillText(p?.emoji||'✦',canvas.width/2,canvas.height*.38);drawText();}
+}
+function downloadCreative(){const c=$('#creative-canvas');if(!c)return;const link=document.createElement('a');link.download='souqna-campaign-creative.png';link.href=c.toDataURL('image/png');link.click();toast('تم تنزيل المادة البصرية بصيغة PNG.');}
 window.addEventListener('hashchange',render);
 document.addEventListener('click',async(event)=>{
   const button=event.target.closest('[data-act]');if(!button)return;
@@ -250,7 +313,12 @@ document.addEventListener('click',async(event)=>{
   }
   if(act==='advance-order'){const order=data.orders.find((o)=>o.id===id);if(!order)return;const i=statusSteps.findIndex(([key])=>key===order.status);if(i>=0&&i<statusSteps.length-1){order.status=statusSteps[i+1][0];order.statusLabel=statusSteps[i+1][1];persist();render();toast('تم تحديث خطوة الطلب التجريبي.');}return;}
   if(act==='copy-campaign'){try{await navigator.clipboard.writeText($('#campaign-text')?.value||'');toast('تم نسخ الخطة.');}catch{$('#campaign-text')?.select();toast('حدّد النص ثم انسخه يدويًا.');}return;}
+  if(act==='render-creative'){renderCreative();return;}
+  if(act==='download-creative'){downloadCreative();return;}
+  if(act==='copy-ad'){try{await navigator.clipboard.writeText(`إعلان ${window.lastCampaignProduct?.name||'منتجك'}\n${$('#creative-form')?.elements.subline.value||''}`);toast('تم نسخ نص الإعلان.');}catch{toast('تعذر النسخ؛ حدّد النص يدويًا.',true);}return;}
   if(act==='save-campaign'){if(!window.lastCampaignProduct)return;data.plans.push({id:uid(),name:window.lastCampaignProduct.name,text:$('#campaign-text')?.value||campaignText(window.lastCampaignProduct),savedAt:new Date().toISOString()});persist();toast('تم حفظ الخطة محليًا في هذه التجربة.');return;}
+  if(act==='delete-category'){const category=(data.categories||[]).find((c)=>c.id===id);if(!category)return;if(!confirm(`حذف القسم «${category.name}»؟ ستبقى المنتجات بهذا الاسم لكنها لن تظهر كقسم إداري.`))return;data.categories=data.categories.filter((c)=>c.id!==id);persist();render();toast('تم حذف القسم من واجهة الأقسام.');return;}
+  if(act==='toggle-category'){const category=(data.categories||[]).find((c)=>c.id===id);if(!category)return;category.visible=category.visible===false;persist();render();toast(category.visible?'أصبح القسم ظاهرًا للمستخدمين.':'تم إخفاء القسم عن المستخدمين.');return;}
   if(act==='reset-demo'){if(!confirm('مسح جميع بيانات التجربة المحلية من هذا المتصفح؟'))return;localStorage.removeItem(STORE_KEY);location.href=`${STORE}#store`;return;}
 });
 document.addEventListener('input',(event)=>{if(event.target.form?.id==='product-form')updateCompletion(event.target.form);});
@@ -323,6 +391,19 @@ document.addEventListener('submit',async(event)=>{
     if(data.user?.id===account.id)data.user=account.active?account:null;
     persist();render();toast(account.active?'تم تحديث بيانات البائع.':'تم إيقاف البائع وإخفاء منتجاته من المتجر.');return;
   }
+  if(form.id==='admin-create-category'){
+    const fd=new FormData(form),name=cleanText(fd.get('name')),icon=cleanText(fd.get('icon'))||'🏷';
+    if(!name){toast('اكتب اسم القسم أولًا.',true);return;}
+    if((data.categories||[]).some((c)=>c.name===name)){toast('هذا القسم موجود بالفعل.',true);return;}
+    data.categories=[...(data.categories||[]),{id:`cat-${uid()}`,name,icon:icon.slice(0,3),visible:true}];persist();render();toast('تم إنشاء القسم وسيظهر للمستخدمين.');return;
+  }
+  if(form.dataset.adminCategoryId){
+    const category=(data.categories||[]).find((c)=>c.id===form.dataset.adminCategoryId);if(!category)return;
+    const fd=new FormData(form),name=cleanText(fd.get('name')),icon=cleanText(fd.get('icon'))||category.icon||'🏷';
+    if(!name){toast('اسم القسم مطلوب.',true);return;}
+    const oldName=category.name;category.name=name;category.icon=icon.slice(0,3);category.visible=fd.get('visible')==='yes';
+    data.products.forEach((p)=>{if(p.category===oldName)p.category=name;});persist();render();toast('تم تعديل القسم وتحديث ظهوره للمستخدمين.');return;
+  }
   if(form.dataset.adminOrderId){
     const order=data.orders.find((entry)=>entry.id===form.dataset.adminOrderId);if(!order)return;
     const stage=new FormData(form).get('status'),labels={new:'تم استلام الطلب',confirmed:'تم التأكيد',preparing:'قيد التجهيز',shipped:'في الطريق',completed:'تم التسليم',cancelled:'ملغي تجريبيًا'};
@@ -332,7 +413,7 @@ document.addEventListener('submit',async(event)=>{
   if(form.id==='campaign-form'){
     const fd=new FormData(form),selected=data.products.find((p)=>p.id===fd.get('productId'));
     const p=selected?{...selected}:{name:cleanText(fd.get('name')),category:cleanText(fd.get('category')),price:Number(fd.get('price')||0),brand:cleanText(fd.get('brand')),description:cleanText(fd.get('description'))};
-    if(!p.name||!p.category){toast('أدخل اسم المنتج والفئة.',true);return;}window.lastCampaignProduct=p;renderCampaignResult(p);toast('جهزنا خطة مقترحة. راجعها وعدّلها قبل الاستخدام.');
+    if(!p.name||!p.category){toast('أدخل اسم المنتج والفئة.',true);return;}window.lastCampaignProduct=p;renderCampaignResult(p);renderCreative();toast('جهزنا خطة إطلاق وإعلانات ومواد بصرية. راجعها وعدّلها قبل الاستخدام.');
   }
 });
 render();
