@@ -75,6 +75,12 @@ app.get('/api/products', wrap(async (req, res) => {
   res.json(list);
 }));
 
+app.get('/api/my-products', guard('seller', 'admin'), wrap(async (req, res) => {
+  const col = db.collection('products');
+  const snap = await (req.user.role === 'admin' ? col : col.where('sellerId', '==', req.uid)).get();
+  res.json(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+}));
+
 app.post('/api/products', guard('seller'), wrap(async (req, res) => {
   const data = cleanProduct(req.body);
   const wantsPublish = req.body.publish === true;

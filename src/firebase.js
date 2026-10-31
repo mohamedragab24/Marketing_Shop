@@ -13,8 +13,8 @@ const firebaseConfig = {
 };
 
 const firebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
-const app = firebaseConfigured ? (getApps().length ? getApp() : initializeApp(firebaseConfig)) : null;
-const auth = app ? getAuth(app) : null;
+export const app = firebaseConfigured ? (getApps().length ? getApp() : initializeApp(firebaseConfig)) : null;
+export const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
 export function isFirebaseConfigured() {

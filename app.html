@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>متجر التسويق الذكي</title>
+<style>
+:root{--navy:#0b2447;--blue:#1d4ed8;--teal:#14b8a6;--bg:#f4f8fb}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--navy)}
+header{background:var(--navy);padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+header a,header button{color:#fff;background:none;border:0;font:inherit;cursor:pointer;text-decoration:none;padding:6px 10px;border-radius:8px}
+header a:hover,header button:hover{background:#ffffff22}header b{margin-inline-end:auto;color:var(--teal)}
+main{max-width:1000px;margin:16px auto;padding:0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.card{background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 6px #0001;display:flex;flex-direction:column;gap:6px}
+.card img{width:100%;height:140px;object-fit:cover;border-radius:8px;background:#e2e8f0}
+.old{text-decoration:line-through;color:#64748b;font-size:.85em}
+input,select,textarea{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit;margin:4px 0}
+button.p{background:var(--blue);color:#fff;border:0;border-radius:8px;padding:10px 14px;font:inherit;cursor:pointer}
+button.p:hover{background:var(--teal)}button.d{background:#dc2626;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+.bar{display:flex;gap:8px;margin-bottom:12px}.box{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}
+.muted{color:#64748b}.err{color:#dc2626}.tag{background:#ccfbf1;border-radius:6px;padding:2px 8px;font-size:.85em}
+#toast{position:fixed;bottom:16px;right:16px;background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;display:none}
+</style>
+</head>
+<body>
+<header id="nav"></header>
+<main id="app"></main>
+<div id="toast"></div>
+<script type="module" src="/src/app.js"></script>
+</body>
+</html>

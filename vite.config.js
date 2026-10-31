@@ -20,11 +20,12 @@ function localHealthRoute() {
 
 export default defineConfig({
   plugins: [localHealthRoute()],
-  server: { host: '0.0.0.0', port: 3000, strictPort: true },
+  server: { host: '0.0.0.0', port: 3000, strictPort: true, proxy: { '/api/(?!health)': 'http://localhost:4000' } },
   preview: { host: '0.0.0.0', port: 3000, strictPort: true },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: { input: { main: 'index.html', app: 'app.html' } },
     // The Firebase SDK is a deliberate on-demand chunk, loaded only when saving progress.
     chunkSizeWarningLimit: 600,
   },
