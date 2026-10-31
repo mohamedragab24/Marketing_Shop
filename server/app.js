@@ -218,6 +218,8 @@ app.post('/api/reviews', guard('buyer'), wrap(async (req, res) => {
   const os = await db.collection('orders').where('buyerId', '==', req.uid).get();
   if (!os.docs.some((d) => d.data().status !== 'cancelled' && d.data().items.some((i) => i.productId === productId))) throw err(403, 'يمكنك تقييم المنتجات التي اشتريتها فقط');
   await db.collection('reviews').doc(`${productId}_${req.uid}`).set({ productId, rating, comment: String(req.body.comment || '').slice(0, 1000), buyerId: req.uid, buyerName: req.user.name, createdAt: FieldValue.serverTimestamp() });
+  const all = list(await db.collection('reviews').where('productId', '==', productId).get());
+  await db.collection('products').doc(productId).update({ ratingAvg: all.reduce((x, y) => x + y.rating, 0) / all.length, ratingCount: all.length });
   res.status(201).json({ ok: true });
 }));
 app.get('/api/admin/reviews', guard('admin'), wrap(async (_q, res) => res.json(list(await db.collection('reviews').get()))));

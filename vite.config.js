@@ -25,7 +25,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    rollupOptions: { input: { main: 'index.html', app: 'app.html' } },
+    rollupOptions: { input: { main: 'index.html', app: 'app.html', seller: 'seller.html' } },
     // The Firebase SDK is a deliberate on-demand chunk, loaded only when saving progress.
     chunkSizeWarningLimit: 600,
   },
