@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /studyProgress/{userId} {
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow list: if false;
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['sections', 'updatedAt'])
+        && request.resource.data.sections is list
+        && request.resource.data.sections.size() <= 20;
+      allow delete: if false;
+    }
+  }
+}
