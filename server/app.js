@@ -24,6 +24,7 @@ const auth = (...roles) => wrap(async (req, _res, ) => {
   const snap = await db.collection('users').doc(decoded.uid).get();
   req.uid = decoded.uid;
   req.user = snap.exists ? snap.data() : null;
+  if (req.user?.blocked) throw err(403, 'الحساب موقوف');
   if (roles.length && (!req.user || !roles.includes(req.user.role))) throw err(403, 'ليست لديك صلاحية');
 });
 const guard = (...roles) => async (req, res, next) => { try { await auth(...roles)(req, res, (e) => { if (e) throw e; }); next(); } catch (e) { next(e); } };
@@ -100,7 +101,8 @@ async function ownProduct(req) {
 }
 app.put('/api/products/:id', guard('seller', 'admin'), wrap(async (req, res) => {
   const ref = await ownProduct(req);
-  await ref.update({ ...cleanProduct(req.body), updatedAt: FieldValue.serverTimestamp() });
+  const extra = req.body.publish === true ? { status: process.env.REQUIRE_REVIEW === 'true' && req.user.role !== 'admin' ? 'pending' : 'published' } : {};
+  await ref.update({ ...cleanProduct(req.body), ...extra, updatedAt: FieldValue.serverTimestamp() });
   res.json({ ok: true });
 }));
 app.delete('/api/products/:id', guard('seller', 'admin'), wrap(async (req, res) => {
@@ -146,8 +148,13 @@ app.post('/api/orders', guard('buyer'), wrap(async (req, res) => {
       return { productId: s.id, sellerId: p.sellerId, name: p.name, qty, price, listPrice: p.price };
     });
     const sellerIds = [...new Set(items.map((i) => i.sellerId))];
+    const code = String(req.body.couponCode || '').trim().toUpperCase();
+    const cs = code ? await t.get(db.collection('coupons').doc(code)) : null;
+    if (code && !(cs.exists && cs.data().active)) throw err(400, 'الكوبون غير صالح');
+    const subtotal = total;
+    if (cs) total = Math.round(total * (100 - cs.data().percent)) / 100;
     items.forEach((i, k) => t.update(refs[k], { stock: FieldValue.increment(-i.qty), sales: FieldValue.increment(i.qty) }));
-    t.set(orderRef, { orderNumber, buyerId: req.uid, buyerName: req.user.name, items, sellerIds, address, paymentMethod, total, status: 'new', createdAt: FieldValue.serverTimestamp() });
+    t.set(orderRef, { orderNumber, buyerId: req.uid, buyerName: req.user.name, items, sellerIds, address, paymentMethod, total, subtotal, couponCode: code || null, status: 'new', createdAt: FieldValue.serverTimestamp() });
     t.set(db.collection('payments').doc(), { orderId: orderRef.id, method: paymentMethod, amount: total, status: paymentMethod === 'card_sim' ? 'simulated_paid' : 'pending_cod', createdAt: FieldValue.serverTimestamp() });
     t.set(...notif(req.uid, 'order', `تم تأكيد طلبك ${orderNumber}`));
     sellerIds.forEach((s) => t.set(...notif(s, 'order', `طلب جديد ${orderNumber}`)));
@@ -172,9 +179,119 @@ app.patch('/api/orders/:id/status', guard('seller', 'admin'), wrap(async (req, r
   if (!snap.exists) throw err(404, 'الطلب غير موجود');
   const o = snap.data();
   if (req.user.role === 'seller' && !o.sellerIds.includes(req.uid)) throw err(403, 'ليس طلبًا لمنتجاتك');
+  if (req.body.status === 'cancelled' && o.status !== 'cancelled') await Promise.all(o.items.map((i) => db.collection('products').doc(i.productId).update({ stock: FieldValue.increment(i.qty) })));
   await ref.update({ status: req.body.status });
   const [r, d] = notif(o.buyerId, 'order', `تغيّرت حالة طلبك ${o.orderNumber}`);
   await r.set(d);
+  res.json({ ok: true });
+}));
+
+const count = async (q) => (await q.count().get()).data().count;
+const list = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+const ANY = ['buyer', 'seller', 'admin'];
+
+app.get('/api/stats', wrap(async (_q, res) => {
+  const [products, users, orders] = await Promise.all([count(db.collection('products').where('status', '==', 'published')), count(db.collection('users')), count(db.collection('orders'))]);
+  res.json({ products, users, orders });
+}));
+
+app.get('/api/categories', wrap(async (_q, res) => res.json(list(await db.collection('categories').get()))));
+app.post('/api/categories', guard('admin'), wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) throw err(400, 'الاسم مطلوب');
+  res.status(201).json({ id: (await db.collection('categories').add({ name: name.slice(0, 60) })).id });
+}));
+app.delete('/api/categories/:id', guard('admin'), wrap(async (req, res) => { await db.collection('categories').doc(req.params.id).delete(); res.json({ ok: true }); }));
+
+app.get('/api/products/:id', wrap(async (req, res) => {
+  const ref = db.collection('products').doc(req.params.id), s = await ref.get();
+  if (!s.exists || s.data().status !== 'published') throw err(404, 'المنتج غير موجود');
+  ref.update({ views: FieldValue.increment(1) }).catch(() => {});
+  const p = { id: s.id, ...s.data() };
+  const [rv, rel] = await Promise.all([db.collection('reviews').where('productId', '==', p.id).get(), db.collection('products').where('category', '==', p.category).where('status', '==', 'published').limit(5).get()]);
+  res.json({ product: p, reviews: list(rv), related: list(rel).filter((x) => x.id !== p.id).slice(0, 4) });
+}));
+
+app.post('/api/reviews', guard('buyer'), wrap(async (req, res) => {
+  const { productId } = req.body, rating = Number(req.body.rating);
+  if (!productId || !Number.isInteger(rating) || rating < 1 || rating > 5) throw err(400, 'تقييم غير صحيح');
+  const os = await db.collection('orders').where('buyerId', '==', req.uid).get();
+  if (!os.docs.some((d) => d.data().status !== 'cancelled' && d.data().items.some((i) => i.productId === productId))) throw err(403, 'يمكنك تقييم المنتجات التي اشتريتها فقط');
+  await db.collection('reviews').doc(`${productId}_${req.uid}`).set({ productId, rating, comment: String(req.body.comment || '').slice(0, 1000), buyerId: req.uid, buyerName: req.user.name, createdAt: FieldValue.serverTimestamp() });
+  res.status(201).json({ ok: true });
+}));
+app.get('/api/admin/reviews', guard('admin'), wrap(async (_q, res) => res.json(list(await db.collection('reviews').get()))));
+app.delete('/api/reviews/:id', guard('admin'), wrap(async (req, res) => { await db.collection('reviews').doc(req.params.id).delete(); res.json({ ok: true }); }));
+
+app.get('/api/favorites', guard('buyer'), wrap(async (req, res) => {
+  const s = await db.collection('favorites').where('uid', '==', req.uid).get();
+  const ps = await Promise.all(s.docs.map((d) => db.collection('products').doc(d.data().productId).get()));
+  res.json(ps.filter((p) => p.exists && p.data().status === 'published').map((p) => ({ id: p.id, ...p.data() })));
+}));
+app.post('/api/favorites/:id', guard('buyer'), wrap(async (req, res) => {
+  const r = db.collection('favorites').doc(`${req.uid}_${req.params.id}`), s = await r.get();
+  if (s.exists) { await r.delete(); return res.json({ favorite: false }); }
+  await r.set({ uid: req.uid, productId: req.params.id });
+  res.json({ favorite: true });
+}));
+
+app.get('/api/notifications', guard(...ANY), wrap(async (req, res) => {
+  const l = list(await db.collection('notifications').where('uid', '==', req.uid).get());
+  res.json(l.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 50));
+}));
+app.post('/api/notifications/read', guard(...ANY), wrap(async (req, res) => {
+  const s = await db.collection('notifications').where('uid', '==', req.uid).where('read', '==', false).get();
+  const b = db.batch(); s.docs.forEach((d) => b.update(d.ref, { read: true })); await b.commit();
+  res.json({ ok: true });
+}));
+
+app.put('/api/profile', guard(...ANY), wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) throw err(400, 'الاسم مطلوب');
+  const addresses = (Array.isArray(req.body.addresses) ? req.body.addresses : []).slice(0, 5).map((a) => ({ line: String(a.line || '').slice(0, 300) })).filter((a) => a.line);
+  if (req.user.role === 'seller' && req.body.storeName) await db.collection('sellers').doc(req.uid).set({ storeName: String(req.body.storeName).slice(0, 80) }, { merge: true });
+  await db.collection('users').doc(req.uid).update({ name, phone: String(req.body.phone || '').slice(0, 30), addresses });
+  res.json({ ok: true });
+}));
+
+app.post('/api/marketing-plans', guard('seller'), wrap(async (req, res) => {
+  if (typeof req.body.plan !== 'string') throw err(400, 'الخطة مطلوبة');
+  const r = await db.collection('marketingPlans').add({ sellerId: req.uid, productName: String(req.body.productName || '').slice(0, 150), plan: req.body.plan.slice(0, 20000), createdAt: FieldValue.serverTimestamp() });
+  res.status(201).json({ id: r.id });
+}));
+
+app.get('/api/coupons', guard('admin'), wrap(async (_q, res) => res.json(list(await db.collection('coupons').get()))));
+app.post('/api/coupons', guard('admin'), wrap(async (req, res) => {
+  const code = String(req.body.code || '').trim().toUpperCase(), percent = Number(req.body.percent);
+  if (!/^[A-Z0-9]{3,20}$/.test(code) || !(percent > 0 && percent <= 90)) throw err(400, 'كوبون غير صحيح (حروف/أرقام إنجليزية، نسبة 1–90)');
+  await db.collection('coupons').doc(code).set({ percent, active: true });
+  res.status(201).json({ ok: true });
+}));
+app.delete('/api/coupons/:code', guard('admin'), wrap(async (req, res) => { await db.collection('coupons').doc(req.params.code).delete(); res.json({ ok: true }); }));
+
+app.patch('/api/orders/:id/cancel', guard('buyer'), wrap(async (req, res) => {
+  const ref = db.collection('orders').doc(req.params.id), s = await ref.get();
+  if (!s.exists || s.data().buyerId !== req.uid) throw err(404, 'الطلب غير موجود');
+  const o = s.data();
+  if (o.status !== 'new') throw err(400, 'لا يمكن إلغاء الطلب بعد بدء مراجعته');
+  await Promise.all(o.items.map((i) => db.collection('products').doc(i.productId).update({ stock: FieldValue.increment(i.qty) })));
+  await ref.update({ status: 'cancelled' });
+  for (const sid of o.sellerIds) { const [r, d] = notif(sid, 'order', `تم إلغاء الطلب ${o.orderNumber}`); await r.set(d); }
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/stats', guard('admin'), wrap(async (_q, res) => {
+  const c = (col, ...w) => count(w.reduce((q, [f, o, v]) => q.where(f, o, v), db.collection(col)));
+  const [users, sellers, buyers, products, published, pending, orders, cancelled] = await Promise.all([c('users'), c('users', ['role', '==', 'seller']), c('users', ['role', '==', 'buyer']), c('products'), c('products', ['status', '==', 'published']), c('products', ['status', '==', 'pending']), c('orders'), c('orders', ['status', '==', 'cancelled'])]);
+  const sales = list(await db.collection('orders').get()).reduce((s, o) => (o.status === 'cancelled' ? s : s + o.total), 0);
+  const ps = list(await db.collection('products').get()).map((p) => ({ name: p.name, views: p.views || 0, sales: p.sales || 0 }));
+  const top = (k) => [...ps].sort((a, b) => b[k] - a[k]).slice(0, 5);
+  res.json({ users, sellers, buyers, products, published, pending, orders, cancelled, sales, topViewed: top('views'), topSold: top('sales') });
+}));
+app.get('/api/admin/users', guard('admin'), wrap(async (_q, res) => res.json(list(await db.collection('users').get()))));
+app.patch('/api/admin/users/:id/block', guard('admin'), wrap(async (req, res) => {
+  if (req.params.id === req.uid) throw err(400, 'لا يمكنك إيقاف حسابك');
+  await db.collection('users').doc(req.params.id).update({ blocked: req.body.blocked === true });
   res.json({ ok: true });
 }));
 

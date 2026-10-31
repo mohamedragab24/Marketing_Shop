@@ -52,3 +52,11 @@ npx firebase-tools deploy --only firestore:rules --project studio-1284053768-822
 - `api/health.js`: نقطة فحص Node.js على Vercel.
 - `firestore.rules` و`firebase.json`: قواعد وتهيئة Firebase CLI.
 - `vercel.json`: أمر البناء ومجلد الإخراج.
+
+
+## المتجر (app.html) والـ API
+
+- `npm run server` يشغّل Express على المنفذ 4000 (يتطلب `.env`: راجع `.env.example`) مع `npm run dev` للواجهة (تمرر /api تلقائيًا).
+- على Vercel أضف `FIREBASE_SERVICE_ACCOUNT` و`REQUIRE_REVIEW`.
+- لتعيين مدير: `npm run make-admin -- email@example.com`.
+- انشر القواعد: `npx firebase-tools deploy --only firestore:rules,storage --project studio-1284053768-822ae`.
