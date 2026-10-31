@@ -1,4 +1,5 @@
 import './ui.css';
+import { renderAdminDashboard } from './admin.js';
 
 const STORE_KEY = 'souqna-demo-store-v2';
 const STORE = '/app.html';
@@ -20,8 +21,9 @@ function readState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
     const user=saved?.user||null, accounts=saved?.accounts||{};
-    if(user?.role) accounts[user.role]=user;
-    return { products:Array.isArray(saved?.products) && saved.products.length ? saved.products : demoProducts, cart:saved?.cart || {}, orders:saved?.orders || [], user, accounts, plans:saved?.plans || [], favorites:saved?.favorites || [] };
+    if(user?.role) { user.active ??= true; accounts[user.role]=user; }
+    for(const account of Object.values(accounts)) if(account) account.active ??= true;
+    return { products:Array.isArray(saved?.products) ? saved.products : demoProducts, cart:saved?.cart || {}, orders:saved?.orders || [], user, accounts, plans:saved?.plans || [], favorites:saved?.favorites || [] };
   } catch { return { products:demoProducts, cart:{}, orders:[], user:null, accounts:{}, plans:[], favorites:[] }; }
 }
 let data = readState();
@@ -38,8 +40,14 @@ function toast(message, error = false) {
   clearTimeout(timer); timer = setTimeout(() => el.classList.remove('toast-visible'), 3200);
 }
 function roleLabel(role) { return role === 'seller' ? 'بائع' : 'مشتري'; }
+function isProductVisible(product) {
+  if(product.status==='draft') return false;
+  const seller=Object.values(data.accounts||{}).find((account)=>account?.id===product.sellerId);
+  return !seller || seller.active!==false;
+}
 function startDemo(role) {
   if(data.accounts?.[role]) {
+    if(data.accounts[role].active===false){toast('هذا الحساب التجريبي موقوف من لوحة الإدارة.',true);return;}
     data.user=data.accounts[role];
     persist(); render(); toast(`رجعناك لحساب ${roleLabel(role)} التجريبي.`); return;
   }
@@ -47,7 +55,7 @@ function startDemo(role) {
   const family = random(['محمود','حسن','علي','إبراهيم','فؤاد','منصور','سامي','خالد']);
   const email = `demo-${uid()}@example.test`, password = `${Math.random().toString(36).slice(2,7)}${Math.floor(100 + Math.random()*900)}`;
   const previous=data.user;
-  data.user = { id:`user-${uid()}`, name:`${first} ${family}`, role, email, password, phone:`01${Math.floor(100000000 + Math.random()*900000000)}`, storeName:role === 'seller' ? `${first} ستوديو` : '', addresses:role === 'buyer' ? ['القاهرة، عنوان تجريبي'] : [] };
+  data.user = { id:`user-${uid()}`, name:`${first} ${family}`, role, active:true, email, password, phone:`01${Math.floor(100000000 + Math.random()*900000000)}`, storeName:role === 'seller' ? `${first} ستوديو` : '', addresses:role === 'buyer' ? ['القاهرة، عنوان تجريبي'] : [] };
   data.accounts[role]=data.user;
   if(!persist()){data.user=previous;delete data.accounts[role];return;}
   render(); toast(`أهلًا ${data.user.name} — تم تجهيز حساب ${roleLabel(role)} تجريبي.`);
@@ -57,7 +65,7 @@ function nav() {
   const role = data.user?.role, cartCount = Object.values(data.cart).reduce((n, item) => n + item.qty, 0);
   $('#nav').innerHTML = `<div class="nav-shell"><a class="brand" href="${STORE}#store" aria-label="سوقنا - الرئيسية"><span class="brand-icon">س</span><span><strong>سوقنا</strong><small>تجربة متجر محلية</small></span></a>
     <button class="mobile-menu" type="button" data-act="menu" aria-label="فتح القائمة">☰</button>
-    <nav class="nav-links" id="nav-links" aria-label="التنقل الرئيسي"><a href="${STORE}#store" class="${mode==='store'?'nav-current':''}">الرئيسية</a><a href="/marketing.html#marketing" class="${mode==='marketing'?'nav-current':''}">التسويق</a><a href="/seller.html#seller" class="${mode==='seller'?'nav-current':''}">لوحة البائع</a><a href="${STORE}#database">🗄 <span>البيانات</span></a></nav>
+    <nav class="nav-links" id="nav-links" aria-label="التنقل الرئيسي"><a href="${STORE}#store" class="${mode==='store'?'nav-current':''}">الرئيسية</a><a href="/marketing.html#marketing" class="${mode==='marketing'?'nav-current':''}">التسويق</a><a href="/seller.html#seller" class="${mode==='seller'?'nav-current':''}">لوحة البائع</a><a href="${STORE}#admin" class="${mode==='store'&&location.hash.startsWith('#admin')?'nav-current':''}">لوحة التحكم</a><a href="${STORE}#database">🗄 <span>البيانات</span></a></nav>
     <div class="nav-actions">${role?`<a class="nav-icon" href="${STORE}#orders" aria-label="طلباتي" title="طلباتي">🧾</a>`:""}<a class="nav-icon" href="${STORE}#cart" aria-label="السلة" title="السلة">🛒 <b>${cartCount}</b></a>
     ${role ? `<a class="user-pill" href="${STORE}#profile"><span class="avatar">${esc(data.user.name.slice(0,1))}</span><span>${esc(data.user.name)}<small>${roleLabel(role)} تجريبي</small></span></a><button class="nav-logout" data-act="logout">خروج</button>` : `<a class="button button-small button-primary" href="${STORE}#login">ابدأ تجربة مجانية</a>`}</div></div>`;
 }
@@ -71,7 +79,7 @@ function productCard(p) {
 }
 function productList(products) { return products.length?`<div class="product-grid">${products.map(productCard).join('')}</div>`:'<div class="empty-state">لا توجد نتائج الآن. جرّب كلمة أخرى أو اختر قسمًا مختلفًا.</div>'; }
 function storePage() {
-  const all = data.products.filter((p)=>p.status!=='draft');
+  const all = data.products.filter(isProductVisible);
   const categories = [...new Set(all.map((p)=>p.category).filter(Boolean))];
   const shown = all.filter((p)=>(!categoryFilter||p.category===categoryFilter)&&(!query||`${p.name} ${p.category} ${p.brand}`.toLocaleLowerCase('ar').includes(query.toLocaleLowerCase('ar'))));
   return `<section class="store-hero"><div class="hero-blob hero-blob-one"></div><div class="hero-blob hero-blob-two"></div><div class="hero-copy"><span class="eyebrow"><i></i> اختيارات يومية، تجربة أسهل</span><h1>كل اللي بتحبه،<br><em>في مكان واحد.</em></h1><p>اكتشف منتجات مميزة من بائعين مستقلين، وجرّب رحلة الشراء خطوة بخطوة.</p><div class="hero-buttons"><a class="button button-primary" href="#catalog">اكتشف المنتجات <span>←</span></a><a class="text-link" href="/seller.html#seller">عندك منتج؟ ابدأ البيع</a></div><div class="hero-proof"><span>✦</span><div><b>${all.length} منتجات معروضة</b><small>تجربة متجر محلية بلا دفع حقيقي</small></div></div></div><div class="hero-showcase"><div class="showcase-card showcase-back">✦ <small>منتجات مختارة</small><b>كل يوم، اكتشاف جديد</b></div><div class="showcase-orbit"></div><div class="showcase-product">👜</div><div class="showcase-tag">اختيار الأسبوع <b>♡</b></div><div class="showcase-note"><span>✳</span><div><b>اختاري براحتك</b><small>السلة والطلبات تجريبية</small></div></div></div></section>
@@ -81,7 +89,7 @@ function storePage() {
 }
 function productPage(id) {
   const p = data.products.find((x)=>x.id===id);
-  if (!p) return `<main class="page-wrap"><div class="empty-state"><h2>المنتج غير موجود</h2><a class="button button-primary" href="${STORE}#store">العودة للمتجر</a></div></main>`;
+  if (!p || !isProductVisible(p)) return `<main class="page-wrap"><div class="empty-state"><h2>المنتج غير موجود</h2><a class="button button-primary" href="${STORE}#store">العودة للمتجر</a></div></main>`;
   const sale = Number(p.discountPrice)>0&&Number(p.discountPrice)<Number(p.price);
   return `<main class="page-wrap product-detail"><a class="back-link" href="${STORE}#store">← العودة للمنتجات</a><div class="detail-layout"><div>${imageView(p,'detail-image')}<div class="closing-note"><span>✳</span><p>الصور والبيانات في هذه التجربة تبقى محفوظة على جهازك.</p></div></div><section class="detail-copy"><span class="section-kicker">${esc(p.category||'منتج')} · ${esc(p.brand||'اختيار مميز')}</span><h1>${esc(p.name)}</h1><div class="detail-price"><strong>${cash(sale?p.discountPrice:p.price)}</strong>${sale?`<del>${cash(p.price)}</del><span class="sale-pill">عرض خاص</span>`:''}</div><p class="detail-description">${esc(p.description||'وصف المنتج غير متوفر.')}</p><div class="availability">${Number(p.stock)>0?`متوفر · ${count(p.stock)} قطعة`:'غير متوفر حاليًا'}</div><div class="detail-facts"><div><small>العلامة</small><b>${esc(p.brand||'غير محدد')}</b></div><div><small>الوزن</small><b>${esc(p.weight||'غير محدد')}</b></div><div><small>الأبعاد</small><b>${esc(p.dimensions||'غير محدد')}</b></div><div><small>المنشأ</small><b>${esc(p.origin||'غير محدد')}</b></div></div><h3>المواصفات</h3><p>${esc(p.specs||'لم تُضف مواصفات بعد.')}</p><p class="policy"><b>سياسة الإرجاع:</b> ${esc(p.returnPolicy||'تُحدد مع البائع.')}</p><div class="detail-actions"><button class="button button-primary" data-act="add" data-id="${esc(p.id)}" ${Number(p.stock)<=0?'disabled':''}>أضف للسلة <span>＋</span></button><button class="button button-outline" data-act="favorite" data-id="${esc(p.id)}">${data.favorites.includes(p.id)?'♥ في المفضلة':'♡ أضف للمفضلة'}</button></div>${p.sellerId===data.user?.id?'<p class="demo-note">هذا منتجك التجريبي.</p>':''}</section></div></main>`;
 }
@@ -179,9 +187,9 @@ const views={store:storePage,login:demoLogin,cart:cartPage,orders:ordersPage,pro
 function render() {
   nav(); let [page,arg]=(location.hash||'').slice(1).split('/');
   if(!page) page=mode==='seller'?'seller':mode==='marketing'?'marketing':'store';
-  const allowed=mode==='seller'?['seller','newproduct','orders','profile']:mode==='marketing'?['marketing']:['store','product','login','cart','orders','profile','database','favorites'];
+  const allowed=mode==='seller'?['seller','newproduct','orders','profile','admin']:mode==='marketing'?['marketing','admin']:['store','product','login','cart','orders','profile','database','favorites','admin'];
   if(!allowed.includes(page)) page=mode==='seller'?'seller':mode==='marketing'?'marketing':'store';
-  $('#app').innerHTML=page==='product'?productPage(decodeURIComponent(arg||'')):views[page]();
+  $('#app').innerHTML=page==='product'?productPage(decodeURIComponent(arg||'')):page==='admin'?renderAdminDashboard(data,arg,{esc,cash,count,isProductVisible}):views[page]();
   if($('#product-form')) updateCompletion($('#product-form'));
 }
 function setPage(page,target=STORE) { location.href=`${target}#${page}`; }
@@ -214,6 +222,26 @@ document.addEventListener('click',async(event)=>{
   if(act==='new-product'){data.editingId='';persist();setPage('newproduct','/seller.html');return;}
   if(act==='edit-product'){data.editingId=id;persist();setPage('newproduct','/seller.html');return;}
   if(act==='delete-product'){data.products=data.products.filter((p)=>p.id!==id);persist();render();toast('تم حذف المنتج من بيانات التجربة.');return;}
+  if(act==='delete-admin-product'){
+    const product=data.products.find((entry)=>entry.id===id);if(!product)return;
+    if(!confirm(`حذف المنتج «${product.name}» من بيانات هذا المتصفح؟`))return;
+    data.products=data.products.filter((entry)=>entry.id!==id);delete data.cart[id];data.favorites=data.favorites.filter((favorite)=>favorite!==id);
+    persist();render();toast('تم حذف المنتج من بيانات التجربة.');return;
+  }
+  if(act==='delete-demo-user'){
+    const role=button.dataset.role,account=data.accounts[role];if(!account)return;
+    if(!confirm(`حذف حساب ${roleLabel(role)} التجريبي من هذا المتصفح؟`))return;
+    delete data.accounts[role];
+    if(role==='seller')data.products=data.products.map((product)=>product.sellerId===account.id?{...product,status:'draft'}:product);
+    if(data.user?.id===account.id)data.user=null;
+    persist();render();toast('تم حذف الحساب التجريبي محليًا.');return;
+  }
+  if(act==='export-admin-data'){
+    const accounts=Object.values(data.accounts||{}).map(({password,...account})=>account);
+    const snapshot={exportedAt:new Date().toISOString(),accounts,products:data.products,orders:data.orders,plans:data.plans};
+    const url=URL.createObjectURL(new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'}));
+    const link=document.createElement('a');link.href=url;link.download='souqna-demo-report.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('بدأ تنزيل نسخة بيانات العرض دون كلمات المرور.');return;
+  }
   if(act==='suggest-product'){if($('#product-form'))suggestMissing($('#product-form'));return;}
   if(act==='polish-product'){if($('#product-form'))polishForm($('#product-form'));return;}
   if(act==='preview-product'){
@@ -269,6 +297,37 @@ document.addEventListener('submit',async(event)=>{
     const order={id:`order-${uid()}`,number,buyerId:data.user.id,buyerName:data.user.name,address:cleanText(new FormData(form).get('address')),items,total:items.reduce((sum,item)=>sum+item.qty*item.price,0),status:'new',statusLabel:statusSteps[0][1],createdAt:new Date().toISOString()};
     data.orders.push(order);data.cart={};if(!persist()){data.products=previousProducts;data.orders=previousOrders;data.cart=previousCart;return;}setPage('orders');toast(`تم إنشاء الطلب التجريبي ${number}.`);return;
   }
+  if(form.id==='admin-create-product'){
+    const fd=new FormData(form),name=cleanText(fd.get('name')),category=cleanText(fd.get('category')),price=Number(fd.get('price')),stock=Number(fd.get('stock'));
+    if(!name||!category||price<=0||stock<0||!Number.isInteger(stock)){toast('تحقق من الاسم والتصنيف والسعر والمخزون.',true);return;}
+    const product={id:`admin-${uid()}`,name,category,price,discountPrice:0,stock,brand:'',weight:'غير محدد',dimensions:'غير محدد',origin:'غير محدد',keywords:[],returnPolicy:'تُحدد مع البائع',description:'',specs:'',images:[],emoji:'📦',tone:'mint',views:0,sales:0,status:'draft',sellerId:null};
+    const previous=data.products;data.products=[product,...data.products];if(!persist()){data.products=previous;return;}render();toast('أُضيف المنتج كمسودة. يمكنك نشره من قائمة المنتجات.');return;
+  }
+  if(form.dataset.adminProductId){
+    const product=data.products.find((entry)=>entry.id===form.dataset.adminProductId);if(!product)return;
+    const fd=new FormData(form),name=cleanText(fd.get('name')),category=cleanText(fd.get('category')),price=Number(fd.get('price')),stock=Number(fd.get('stock'));
+    if(!name||!category||price<=0||stock<0||!Number.isInteger(stock)){toast('تحقق من الاسم والتصنيف والسعر والمخزون.',true);return;}
+    const old={...product},oldCart={...data.cart};Object.assign(product,{name,category,price,stock,status:fd.get('status')==='draft'?'draft':'published'});
+    if(data.cart[product.id]){if(stock===0)delete data.cart[product.id];else data.cart[product.id].qty=Math.min(data.cart[product.id].qty,stock);if(data.cart[product.id])data.cart[product.id].price=price;}
+    if(!persist()){Object.assign(product,old);data.cart=oldCart;return;}render();toast('تم حفظ تعديلات المنتج محليًا.');return;
+  }
+  if(form.dataset.adminUserRole){
+    const role=form.dataset.adminUserRole,account=data.accounts[role];if(!account)return;
+    const fd=new FormData(form);account.name=cleanText(fd.get('name'))||account.name;account.active=fd.get('active')==='yes';data.accounts[role]=account;
+    if(data.user?.id===account.id)data.user=account.active?account:null;
+    persist();render();toast(account.active?'تم تحديث الحساب التجريبي.':'تم إيقاف الحساب التجريبي.');return;
+  }
+  if(form.dataset.adminSellerRole){
+    const account=data.accounts.seller;if(!account)return;
+    const fd=new FormData(form);account.storeName=cleanText(fd.get('storeName'))||account.storeName;account.active=fd.get('active')==='yes';data.accounts.seller=account;
+    if(data.user?.id===account.id)data.user=account.active?account:null;
+    persist();render();toast(account.active?'تم تحديث بيانات البائع.':'تم إيقاف البائع وإخفاء منتجاته من المتجر.');return;
+  }
+  if(form.dataset.adminOrderId){
+    const order=data.orders.find((entry)=>entry.id===form.dataset.adminOrderId);if(!order)return;
+    const stage=new FormData(form).get('status'),labels={new:'تم استلام الطلب',confirmed:'تم التأكيد',preparing:'قيد التجهيز',shipped:'في الطريق',completed:'تم التسليم',cancelled:'ملغي تجريبيًا'};
+    if(!labels[stage]){toast('اختر مرحلة صحيحة للطلب.',true);return;}order.status=stage;order.statusLabel=labels[stage];persist();render();toast('تم تحديث حالة الطلب التجريبي.');return;
+  }
   if(form.id==='profile-form'){const fd=new FormData(form);data.user.name=cleanText(fd.get('name'))||data.user.name;if(data.user.role==='seller')data.user.storeName=cleanText(fd.get('storeName'));else data.user.addresses=[cleanText(fd.get('address'))];data.accounts[data.user.role]=data.user;persist();render();toast('تم حفظ التعديلات محليًا.');return;}
   if(form.id==='campaign-form'){
     const fd=new FormData(form),selected=data.products.find((p)=>p.id===fd.get('productId'));
@@ -276,5 +335,4 @@ document.addEventListener('submit',async(event)=>{
     if(!p.name||!p.category){toast('أدخل اسم المنتج والفئة.',true);return;}window.lastCampaignProduct=p;renderCampaignResult(p);toast('جهزنا خطة مقترحة. راجعها وعدّلها قبل الاستخدام.');
   }
 });
-if(!data.products.length)data.products=demoProducts;
 render();
