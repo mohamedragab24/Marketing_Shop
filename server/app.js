@@ -2,15 +2,16 @@ import express from 'express';
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { seed } from './seed-data.js';
 
+let initError = null;
 if (!getApps().length) {
-  const sa = process.env.FIREBASE_SERVICE_ACCOUNT; // JSON كامل في متغير بيئة، لا يُرفع للمستودع أبدًا
-  initializeApp({
-    credential: sa ? cert(JSON.parse(sa)) : applicationDefault(),
-    projectId: process.env.FIREBASE_PROJECT_ID || 'studio-1284053768-822ae',
-  });
+  try {
+    const sa = process.env.FIREBASE_SERVICE_ACCOUNT; // JSON كامل من Firebase Console > Service accounts
+    initializeApp({ credential: sa ? cert(JSON.parse(sa)) : applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID || 'studio-1284053768-822ae' });
+  } catch (e) { initError = e; }
 }
-const db = getFirestore();
+const db = initError ? null : getFirestore();
 const ORDER_STATUSES = ['new', 'reviewing', 'confirmed', 'preparing', 'shipped', 'completed', 'cancelled'];
 const err = (status, message) => Object.assign(new Error(message), { status });
 const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
@@ -41,14 +42,20 @@ function cleanProduct(b) {
     name: String(b.name).trim(), price, discountPrice, stock, category: String(b.category).trim(),
     brand: String(b.brand || '').slice(0, 80), description: String(b.description || '').slice(0, 5000),
     specs: String(b.specs || '').slice(0, 3000), keywords: Array.isArray(b.keywords) ? b.keywords.slice(0, 20).map(String) : [],
-    images: Array.isArray(b.images) ? b.images.filter((u) => /^https:\/\//.test(u)).slice(0, 8) : [],
+    images: Array.isArray(b.images) ? b.images.filter((u) => typeof u === 'string' && u.length < 200000 && /^(https:\/\/|data:image\/(jpeg|png|webp);base64,)/.test(u)).slice(0, 4) : [],
     weight: String(b.weight || ''), dimensions: String(b.dimensions || ''), origin: String(b.origin || ''),
     returnPolicy: String(b.returnPolicy || '').slice(0, 1000),
   };
 }
 
 export const app = express();
-app.use(express.json({ limit: '200kb' }));
+app.use(express.json({ limit: '1mb' }));
+app.get('/api/diag', async (_q, res) => {
+  const out = { serviceAccountEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT, projectId: process.env.FIREBASE_PROJECT_ID || 'studio-1284053768-822ae', initError: initError ? String(initError.message).slice(0, 120) : null };
+  try { await db.collection('categories').limit(1).get(); out.firestore = 'ok'; } catch (e) { out.firestore = String(e.message).slice(0, 200); }
+  res.json(out);
+});
+app.use('/api', (_q, _r, next) => next(initError ? err(500, 'خطأ في الإعداد: محتوى FIREBASE_SERVICE_ACCOUNT غير صحيح (يجب أن يكون JSON كاملًا)') : undefined));
 
 app.post('/api/register', guard(), wrap(async (req, res) => {
   if (req.user) throw err(409, 'الحساب موجود مسبقًا');
@@ -68,7 +75,7 @@ app.get('/api/me', guard(), (req, res) => res.json({ uid: req.uid, ...req.user }
 app.get('/api/products', wrap(async (req, res) => {
   const { q = '', category, min, max } = req.query;
   const snap = await db.collection('products').where('status', '==', 'published').get();
-  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => {
+  const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), images: (d.data().images || []).slice(0, 1) })).filter((p) => {
     const price = p.discountPrice || p.price;
     return (!category || p.category === category) && (!min || price >= +min) && (!max || price <= +max)
       && (!q || p.name.includes(q) || p.keywords?.some((k) => k.includes(q)));
@@ -79,7 +86,8 @@ app.get('/api/products', wrap(async (req, res) => {
 app.get('/api/my-products', guard('seller', 'admin'), wrap(async (req, res) => {
   const col = db.collection('products');
   const snap = await (req.user.role === 'admin' ? col : col.where('sellerId', '==', req.uid)).get();
-  res.json(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  const slim = req.user.role === 'admin';
+  res.json(snap.docs.map((d) => ({ id: d.id, ...d.data(), ...(slim ? { images: (d.data().images || []).slice(0, 1) } : {}) })));
 }));
 
 app.post('/api/products', guard('seller'), wrap(async (req, res) => {
@@ -199,7 +207,7 @@ app.get('/api/categories', wrap(async (_q, res) => res.json(list(await db.collec
 app.post('/api/categories', guard('admin'), wrap(async (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name) throw err(400, 'الاسم مطلوب');
-  res.status(201).json({ id: (await db.collection('categories').add({ name: name.slice(0, 60) })).id });
+  res.status(201).json({ id: (await db.collection('categories').add({ name: name.slice(0, 60), icon: String(req.body.icon || '🏷').slice(0, 4) })).id });
 }));
 app.delete('/api/categories/:id', guard('admin'), wrap(async (req, res) => { await db.collection('categories').doc(req.params.id).delete(); res.json({ ok: true }); }));
 
@@ -209,7 +217,7 @@ app.get('/api/products/:id', wrap(async (req, res) => {
   ref.update({ views: FieldValue.increment(1) }).catch(() => {});
   const p = { id: s.id, ...s.data() };
   const [rv, rel] = await Promise.all([db.collection('reviews').where('productId', '==', p.id).get(), db.collection('products').where('category', '==', p.category).where('status', '==', 'published').limit(5).get()]);
-  res.json({ product: p, reviews: list(rv), related: list(rel).filter((x) => x.id !== p.id).slice(0, 4) });
+  res.json({ product: p, reviews: list(rv), related: list(rel).filter((x) => x.id !== p.id).slice(0, 4).map((x) => ({ ...x, images: (x.images || []).slice(0, 1) })) });
 }));
 
 app.post('/api/reviews', guard('buyer'), wrap(async (req, res) => {
@@ -228,7 +236,7 @@ app.delete('/api/reviews/:id', guard('admin'), wrap(async (req, res) => { await 
 app.get('/api/favorites', guard('buyer'), wrap(async (req, res) => {
   const s = await db.collection('favorites').where('uid', '==', req.uid).get();
   const ps = await Promise.all(s.docs.map((d) => db.collection('products').doc(d.data().productId).get()));
-  res.json(ps.filter((p) => p.exists && p.data().status === 'published').map((p) => ({ id: p.id, ...p.data() })));
+  res.json(ps.filter((p) => p.exists && p.data().status === 'published').map((p) => ({ id: p.id, ...p.data(), images: (p.data().images || []).slice(0, 1) })));
 }));
 app.post('/api/favorites/:id', guard('buyer'), wrap(async (req, res) => {
   const r = db.collection('favorites').doc(`${req.uid}_${req.params.id}`), s = await r.get();
@@ -290,6 +298,7 @@ app.get('/api/admin/stats', guard('admin'), wrap(async (_q, res) => {
   const top = (k) => [...ps].sort((a, b) => b[k] - a[k]).slice(0, 5);
   res.json({ users, sellers, buyers, products, published, pending, orders, cancelled, sales, topViewed: top('views'), topSold: top('sales') });
 }));
+app.post('/api/admin/seed', guard('admin'), wrap(async (_q, res) => res.json(await seed(db))));
 app.get('/api/admin/users', guard('admin'), wrap(async (_q, res) => res.json(list(await db.collection('users').get()))));
 app.patch('/api/admin/users/:id/block', guard('admin'), wrap(async (req, res) => {
   if (req.params.id === req.uid) throw err(400, 'لا يمكنك إيقاف حسابك');
@@ -300,5 +309,10 @@ app.patch('/api/admin/users/:id/block', guard('admin'), wrap(async (req, res) =>
 app.use('/api', (_req, _res, next) => next(err(404, 'المسار غير موجود')));
 app.use((e, _req, res, _next) => {
   if (!e.status) console.error(e);
-  res.status(e.status || 500).json({ error: e.status ? e.message : 'خطأ في الخادم' });
+  const m = String(e.message || '');
+  const hint = /credential/i.test(m) ? 'مفتاح FIREBASE_SERVICE_ACCOUNT غير مضبوط على Vercel'
+    : e.code === 5 || /NOT_FOUND/.test(m) ? 'قاعدة Firestore لم تُنشأ بعد في Firebase Console'
+    : e.code === 7 || /PERMISSION_DENIED/.test(m) ? 'مفتاح الخدمة لا يملك صلاحية الوصول إلى Firestore'
+    : null;
+  res.status(e.status || 500).json({ error: e.status ? m : hint ? 'خطأ في الإعداد: ' + hint : 'خطأ في الخادم' });
 });

@@ -59,4 +59,8 @@ npx firebase-tools deploy --only firestore:rules --project studio-1284053768-822
 - `npm run server` يشغّل Express على المنفذ 4000 (يتطلب `.env`: راجع `.env.example`) مع `npm run dev` للواجهة (تمرر /api تلقائيًا).
 - على Vercel أضف `FIREBASE_SERVICE_ACCOUNT` و`REQUIRE_REVIEW`.
 - لتعيين مدير: `npm run make-admin -- email@example.com`.
-- انشر القواعد: `npx firebase-tools deploy --only firestore:rules,storage --project studio-1284053768-822ae`.
+- انشر القواعد: `npx firebase-tools deploy --only firestore:rules --project studio-1284053768-822ae`.
+
+- الصور تُصغَّر في المتصفح وتُحفظ داخل Firestore (بدون Cloud Storage/Blaze).
+- بيانات تجريبية: `npm run seed` أو زر «تحميل منتجات وأقسام تجريبية» في لوحة المدير.
+- تشخيص الأخطاء: افتح `/api/diag`.

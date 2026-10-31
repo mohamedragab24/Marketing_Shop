@@ -12,7 +12,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
     "server": "node server/index.js",
-    "make-admin": "node server/make-admin.js"
+    "make-admin": "node server/make-admin.js",
+    "seed": "node server/seed.js"
   },
   "dependencies": {
     "firebase": "13.1.0",

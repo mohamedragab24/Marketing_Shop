@@ -1,7 +1,6 @@
 import './ui.css';
-import { auth, app as fbApp } from './firebase.js';
+import { auth } from './firebase.js';
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -29,7 +28,8 @@ async function api(path, opts = {}) {
 }
 
 const MODE = document.body.dataset.mode || 'store';
-const ALLOW = { store: ['store', 'product', 'cart', 'favorites', 'orders', 'notifications', 'profile', 'login', 'er'], seller: ['seller', 'newproduct', 'marketing', 'admin', 'orders', 'notifications', 'profile', 'login', 'er'] };
+const ALLOW = { store: ['store', 'product', 'cart', 'favorites', 'orders', 'notifications', 'profile', 'login', 'er'], marketing: ['marketing'], seller: ['seller', 'newproduct', 'marketing', 'admin', 'orders', 'notifications', 'profile', 'login', 'er'] };
+const dflt = () => (MODE === 'seller' ? (me ? (me.role === 'admin' ? 'admin' : 'seller') : 'login') : MODE === 'marketing' ? 'marketing' : 'store');
 const home = () => (MODE === 'seller' ? (me?.role === 'admin' ? '#admin' : '#seller') : '#store');
 const goStore = () => (['', '#store'].includes(location.hash) ? render() : (location.hash = '#store'));
 
@@ -42,10 +42,10 @@ function nav() {
     $('#nav').innerHTML = '<div class="brand">🏪 بوابة البائعين</div>' + L.map(([k, i, l]) => `<a href="#${k}" class="${cur === k ? 'on' : ''}">${i} ${l}</a>`).join('') + '<a href="/app.html">🛍 الذهاب إلى المتجر</a><a href="/">📚 الشرح التعليمي</a>' + (me ? `<button data-act="logout">خروج (${esc(me.name)})</button>` : '');
     return;
   }
-  $('#nav').innerHTML = `<div class="top"><a class="logo" href="#store" data-act="home">🛍 المتجر<b>الذكي</b></a>
-    <form id="sf" class="search"><input name="q" placeholder="ابحث عن منتج أو علامة تجارية…" value="${esc(f.q)}"><button>🔍</button></form>
-    <a href="${me ? '#profile' : '#login'}">👤 ${me ? esc(me.name) : 'تسجيل الدخول'}</a>${me ? '<a href="#orders">🧾 طلباتي</a>' : ''}<a href="#cart">🛒 السلة <span class="badge">${n}</span></a></div>
-    <div class="strip"><a href="#store" data-act="home">الرئيسية</a>${isBuyer() ? '<a href="#favorites">❤️ المفضلة</a>' : ''}${me ? '<a href="#notifications">🔔 الإشعارات</a>' : ''}<a href="/">📚 الشرح التعليمي</a><a href="#er">🗄 قاعدة البيانات</a>
+  const search = MODE === 'store' ? `<form id="sf" class="search"><input name="q" placeholder="ابحث عن منتج أو علامة تجارية…" value="${esc(f.q)}"><button>🔍</button></form>` : '<span style="flex:1"></span>';
+  $('#nav').innerHTML = `<div class="top"><a class="logo" href="/app.html" ${MODE === 'store' ? 'data-act="home"' : ''}>🛍 المتجر<b>الذكي</b></a>${search}
+    <a class="cta sm" href="/app.html#er">🗄 قاعدة البيانات</a><a href="/app.html#${me ? 'profile' : 'login'}">👤 ${me ? esc(me.name) : 'تسجيل الدخول'}</a>${me ? '<a href="/app.html#orders">🧾 طلباتي</a>' : ''}<a href="/app.html#cart">🛒 السلة <span class="badge">${n}</span></a></div>
+    <div class="strip"><a href="/">📚 الرئيسية — قواعد البيانات</a><a href="/app.html" ${MODE === 'store' ? 'data-act="home"' : ''}>🛍 المتجر</a><a href="/marketing.html">📣 التسويق</a>${isBuyer() ? '<a href="/app.html#favorites">❤️ المفضلة</a>' : ''}${me ? '<a href="/app.html#notifications">🔔 الإشعارات</a>' : ''}
     <a href="/seller.html">🏪 ${role === 'seller' || role === 'admin' ? 'لوحة البائع' : 'بيع على المتجر'}</a>${me ? '<button data-act="logout">خروج</button>' : ''}</div>`;
 }
 
@@ -97,17 +97,20 @@ const ERT = { Users: ['id PK', 'name', 'role', 'phone', 'addresses[] (Addresses)
 const views = {
   async store() {
     const qs = new URLSearchParams({ q: f.q, category: f.category });
-    const [list, st, cats] = await Promise.all([api('/products?' + qs), api('/stats'), api('/categories')]);
+    const [pr, sr, cr] = await Promise.allSettled([api('/products?' + qs), api('/stats'), api('/categories')]);
+    if (pr.status === 'rejected') throw pr.reason;
+    const list = pr.value, st = sr.value || { products: list.length, users: 0, orders: 0 }, cats = cr.value || [];
     if (isBuyer()) favIds = new Set((await api('/favorites')).map((p) => p.id));
     const t = (p) => p.createdAt?.seconds || 0, byNew = [...list].sort((a, b) => t(b) - t(a)), byTop = [...list].sort((a, b) => (b.sales || 0) - (a.sales || 0));
     const chips = `<div class="chips"><button data-act="cat" data-id="" class="${!f.category ? 'on' : ''}">الكل</button>${cats.map((c) => `<button data-act="cat" data-id="${esc(c.name)}" class="${f.category === c.name ? 'on' : ''}">${esc(c.name)}</button>`).join('')}</div>`;
+    const tiles = cats.length ? `<div class="sec"><h2>تسوّق حسب القسم</h2><div class="tiles">${cats.map((x) => `<button data-act="cat" data-id="${esc(x.name)}"><span>${esc(x.icon || '🏷')}</span>${esc(x.name)}</button>`).join('')}</div></div>` : '';
     if (f.q || f.category) {
       const sorted = f.sort === 'top' ? byTop : f.sort === 'sale' ? list.filter((p) => p.discountPrice) : byNew;
       return `${chips}<div class="tabs">${[['new', 'الأحدث'], ['top', 'الأكثر مبيعًا'], ['sale', 'المخفضة']].map(([k, l]) => `<button data-act="sort" data-id="${k}" class="${f.sort === k ? 'on' : ''}">${l}</button>`).join('')}</div><h3>${list.length} نتيجة ${f.q ? `لـ «${esc(f.q)}»` : ''}</h3>${grid(sorted)}`;
     }
     return `<div class="hero"><div><h1>تسوّق بذكاء من بائعين موثوقين</h1><p>اكتشف أحدث المنتجات والعروض، واشترِ بخطوات بسيطة.</p><a class="cta" href="#store" data-act="cat" data-id="">تسوّق الآن</a></div>
-      <div class="stats"><div><b>${st.products}</b>منتج</div><div><b>${st.users}</b>مستخدم</div><div><b>${st.orders}</b>طلب</div></div></div>${chips}
-      ${sec('🔥 عروض وخصومات', byNew.filter((p) => p.discountPrice).slice(0, 5))}${sec('⭐ الأكثر مبيعًا', byTop.filter((p) => p.sales).slice(0, 5))}${sec('🆕 وصل حديثًا', byNew.slice(0, 10))}
+      <div class="stats"><div><b>${st.products}</b>منتج</div><div><b>${st.users}</b>مستخدم</div><div><b>${st.orders}</b>طلب</div></div></div>${tiles}
+      ${sec('🔥 عروض وخصومات', byNew.filter((p) => p.discountPrice).slice(0, 5))}${sec('⭐ الأكثر مبيعًا', byTop.filter((p) => p.sales).slice(0, 5))}${sec('🆕 وصل حديثًا', byNew.slice(0, 10))}${list.length ? '' : '<div class="box"><b>لا توجد منتجات منشورة بعد.</b><br>سجّل كبائع من بوابة البائعين وانشر أول منتج.</div>'}
       <div class="trust"><div>🚚 توصيل لجميع المحافظات</div><div>🔒 دفع تجريبي آمن</div><div>↩️ سياسة استبدال واسترجاع</div><div>⭐ تقييمات حقيقية من مشترين</div></div>`;
   },
   async product(id) {
@@ -177,16 +180,18 @@ const views = {
     const ed = editing, v = (k) => esc(ed?.[k] ?? ''), inp = (k, l, t = 'text', req) => `<input name="${k}" type="${t}" step="any" placeholder="${l}" value="${v(k)}" ${req ? 'required' : ''}>`;
     const form = me.role === 'seller' ? `<form id="pf" class="box"><h3>${ed ? 'تعديل منتج' : 'إضافة منتج'}</h3>${inp('name', 'اسم المنتج', 'text', 1)}${inp('price', 'السعر الأساسي', 'number', 1)}${inp('discountPrice', 'السعر بعد الخصم', 'number')}${inp('stock', 'الكمية المتاحة', 'number', 1)}
       <input name="category" list="cats" placeholder="التصنيف" value="${v('category')}" required><datalist id="cats">${cats.map((c) => `<option value="${esc(c.name)}">`).join('')}</datalist>${inp('brand', 'العلامة التجارية')}${inp('weight', 'الوزن')}${inp('dimensions', 'الأبعاد')}${inp('origin', 'بلد المنشأ')}${inp('keywords', 'الكلمات المفتاحية (بفواصل)')}${inp('returnPolicy', 'سياسة الاستبدال والاسترجاع')}
-      <textarea name="description" placeholder="وصف المنتج">${v('description')}</textarea><textarea name="specs" placeholder="المواصفات">${v('specs')}</textarea><label>الصورة الرئيسية + صور إضافية (حتى 5)</label><input name="image" type="file" accept="image/*" multiple>
+      <textarea name="description" placeholder="وصف المنتج">${v('description')}</textarea><textarea name="specs" placeholder="المواصفات">${v('specs')}</textarea><label>الصورة الرئيسية + صور إضافية (حتى 4)</label><input name="image" type="file" accept="image/*" multiple>
       <div id="meter"></div><label><input type="checkbox" name="publish" style="width:auto"> نشر (وإلا يُحفظ كمسودة)</label><br><button class="p">${ed ? 'حفظ التعديلات' : 'حفظ'}</button> <button type="button" class="p" data-act="preview">معاينة</button>${ed ? ' <button type="button" class="d" data-act="canceledit">إلغاء التعديل</button>' : ''}<div id="prev"></div></form>` : '';
     return form || '<div class="box">هذه الصفحة للبائعين فقط.</div>';
   },
   async marketing() {
-    if (me?.role !== 'seller') return '<p class="err">للبائعين فقط.</p>';
-    mine = Object.fromEntries((await api('/my-products')).map((p) => [p.id, p]));
-    return `<form id="mf" class="box"><h3>مساعد التسويق</h3><select name="pick" data-act="pickp"><option value="">— اختر منتجًا أو أدخل البيانات يدويًا —</option>${Object.values(mine).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+    const S = me?.role === 'seller';
+    if (S) mine = Object.fromEntries((await api('/my-products')).map((p) => [p.id, p]));
+    const intro = MODE === 'marketing' ? `<div class="hero"><div><h1>📣 التسويق الرقمي للمنتجات</h1><p>جهّز خطة تسويق كاملة لمنتجك في ثوانٍ، ثم انشره في المتجر.</p><a class="cta" href="/seller.html">🏪 ابدأ البيع الآن</a></div></div>
+      <div class="trust"><div>🎯 تحديد الجمهور والفئة العمرية</div><div>🔎 كلمات SEO وعناوين جذابة</div><div>📱 منشورات وفيديوهات ومنصات</div><div>📅 خطة 30 يومًا ومتابعة الأداء</div></div>` : '';
+    return intro + `<form id="mf" class="box"><h3>مساعد التسويق</h3>${S ? `<select name="pick" data-act="pickp"><option value="">— اختر منتجًا أو أدخل البيانات يدويًا —</option>${Object.values(mine).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
       <input name="name" placeholder="اسم المنتج" required><input name="category" placeholder="التصنيف" required><input name="price" type="number" placeholder="السعر"><input name="brand" placeholder="العلامة التجارية"><textarea name="description" placeholder="وصف مختصر"></textarea><button class="p">إنشاء خطة تسويقية</button></form>
-      <div id="planbox"></div><p class="muted">الاقتراحات تُولَّد بقوالب إرشادية داخل الموقع وليست ضمانًا للمبيعات. للتحليل الذكي الفعلي يلزم ربط خدمة ذكاء اصطناعي بمفتاح API.</p>`;
+      <div id="planbox"></div><p class="muted">الاقتراحات تُولَّد بقوالب إرشادية داخل الموقع وليست ضمانًا للمبيعات. ${S ? '' : 'سجّل كبائع (من بوابة البائعين) لحفظ خططك.'}</p>`;
   },
   async admin() {
     if (me?.role !== 'admin') return '<p class="err">للمدير فقط.</p>';
@@ -194,8 +199,8 @@ const views = {
     const sc = ([l, x]) => `<div class="card"><span class="muted">${l}</span><b style="font-size:1.4em">${x}</b></div>`;
     const bars = (a, k) => { const m = Math.max(1, ...a.map((x) => x[k])); return a.map((x) => `<div>${esc(x.name)}<div class="bar2" style="width:${(x[k] / m) * 100}%">${x[k]}</div></div>`).join('') || '<p class="muted">لا بيانات</p>'; };
     return `<div class="grid">${[['المستخدمون', s.users], ['البائعون', s.sellers], ['المشترون', s.buyers], ['المنتجات', s.products], ['المنشورة', s.published], ['قيد المراجعة', s.pending], ['الطلبات', s.orders], ['المبيعات التجريبية', money(s.sales)], ['الملغاة', s.cancelled]].map(sc).join('')}</div>
-      <div class="box"><h3>الأكثر مشاهدة</h3>${bars(s.topViewed, 'views')}<h3>الأكثر طلبًا</h3>${bars(s.topSold, 'sales')}</div>
-      <div class="box"><h3>التصنيفات</h3><form id="catf" class="bar"><input name="name" placeholder="تصنيف جديد" required><button class="p">إضافة</button></form>${cats.map((c) => `<span class="tag">${esc(c.name)} <a href="#" data-act="delcat" data-id="${c.id}">✕</a></span> `).join('')}</div>
+      <div class="box"><button class="p" data-act="seed">📦 تحميل منتجات وأقسام تجريبية</button> <span class="muted">بيانات عرض واقعية؛ آمن إعادة الضغط.</span></div><div class="box"><h3>الأكثر مشاهدة</h3>${bars(s.topViewed, 'views')}<h3>الأكثر طلبًا</h3>${bars(s.topSold, 'sales')}</div>
+      <div class="box"><h3>التصنيفات</h3><form id="catf" class="bar"><input name="icon" placeholder="إيموجي" style="max-width:90px"><input name="name" placeholder="تصنيف جديد" required><button class="p">إضافة</button></form>${cats.map((c) => `<span class="tag">${esc(c.icon || '')} ${esc(c.name)} <a href="#" data-act="delcat" data-id="${c.id}">✕</a></span> `).join('')}</div>
       <div class="box"><h3>الكوبونات</h3><form id="cpf" class="bar"><input name="code" placeholder="CODE10" required><input name="percent" type="number" placeholder="نسبة الخصم" required><button class="p">إضافة</button></form>${coupons.map((c) => `<span class="tag">${esc(c.id)} ${c.percent}٪ <a href="#" data-act="delcp" data-id="${c.id}">✕</a></span> `).join('')}</div>
       <div class="box"><h3>المستخدمون</h3>${users.map((u) => `<div>${esc(u.name)} — ${esc(u.role)} ${u.blocked ? '<span class="tag">موقوف</span>' : ''} ${u.role !== 'admin' ? `<button class="d" data-act="block" data-id="${u.id}" data-b="${!u.blocked}">${u.blocked ? 'تفعيل' : 'إيقاف'}</button>` : ''}</div>`).join('')}</div>
       <div class="box"><h3>التقييمات</h3>${reviews.map((x) => `<div>${stars(x.rating)} ${esc(x.comment)} — ${esc(x.buyerName)} <button class="d" data-act="delrv" data-id="${x.id}">حذف</button></div>`).join('') || '<p class="muted">لا تقييمات</p>'}</div>`;
@@ -211,11 +216,10 @@ async function render() {
   nav();
   if (!authReady) return;
   let [v, arg] = (location.hash || '').slice(1).split('/');
-  if (!v) v = MODE === 'seller' ? (me ? (me.role === 'admin' ? 'admin' : 'seller') : 'login') : 'store';
-  if (!ALLOW[MODE].includes(v)) v = MODE === 'seller' ? 'seller' : 'store';
+  if (!v || !ALLOW[MODE].includes(v)) v = dflt();
   if (MODE === 'seller' && !me) v = 'login';
   const el = $('#app'); el.innerHTML = '<p class="muted">جاري التحميل…</p>';
-  try { el.innerHTML = await (views[v] || views.store)(arg); } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  try { el.innerHTML = await (views[v] || views.store)(arg); } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p><p class="muted">لتشخيص السبب افتح <a href="/api/diag"><u>/api/diag</u></a></p>`; }
   updateMeter();
 }
 async function loadMe(u) {
@@ -235,6 +239,12 @@ function updateMeter() {
   const n = Object.keys(L).length + 1, pct = Math.round(((n - miss.length) / n) * 100), p = +fd.get('price'), d = +fd.get('discountPrice');
   $('#meter').innerHTML = `<div>اكتمال البيانات: ${pct}٪ ${d && p ? `— نسبة الخصم ${Math.round((1 - d / p) * 100)}٪` : ''}</div><div style="background:#e2e8f0;border-radius:6px"><div style="height:8px;width:${pct}%;background:#14b8a6;border-radius:6px"></div></div>${miss.length ? `<small class="muted">ناقص قبل النشر: ${miss.join('، ')}</small>` : ''}`;
 }
+async function shrink(file, max = 700) { // تصغير الصورة في المتصفح وحفظها داخل Firestore (بدون Cloud Storage)
+  const bmp = await createImageBitmap(file), k = Math.min(1, max / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas');
+  cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  return cv.toDataURL('image/jpeg', 0.72);
+}
 const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok); } catch (e) { toast(e.message, true); } };
 const body = (fd) => ({ ...fd, keywords: (fd.keywords || '').split(',').map((k) => k.trim()).filter(Boolean) });
 
@@ -251,12 +261,11 @@ document.addEventListener('submit', (e) => {
   }, 'تم إنشاء الحساب');
   if (id === 'pf') run(async () => {
     const images = [...(editing?.images || [])];
-    for (const file of [...form.image.files].slice(0, 5)) {
-      if (file.size > 5 * 1024 * 1024) throw new Error('إحدى الصور أكبر من 5MB');
-      const rf = ref(getStorage(fbApp), `products/${auth.currentUser.uid}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${(file.type.split('/')[1] || 'jpg').replace(/[^a-z0-9]/gi, '')}`);
-      await uploadBytes(rf, file); images.push(await getDownloadURL(rf));
+    for (const file of [...form.image.files].slice(0, Math.max(0, 4 - images.length))) {
+      if (file.size > 12 * 1024 * 1024) throw new Error('إحدى الصور كبيرة جدًا');
+      images.push(await shrink(file));
     }
-    const b = { ...body(fd), images: images.slice(0, 8), publish: !!fd.publish }; delete b.image;
+    const b = { ...body(fd), images: images.slice(0, 4), publish: !!fd.publish }; delete b.image;
     const res = editing ? await api('/products/' + editing.id, { method: 'PUT', body: b }) : await api('/products', { method: 'POST', body: b });
     editing = null; toast(res.status ? 'الحالة: ' + PST[res.status] : 'تم حفظ التعديلات'); location.hash = '#seller'; render();
   });
@@ -273,7 +282,7 @@ document.addEventListener('submit', (e) => {
   }, 'تم حفظ البيانات');
   if (id === 'catf') run(async () => { await api('/categories', { method: 'POST', body: fd }); render(); }, 'تمت الإضافة');
   if (id === 'cpf') run(async () => { await api('/coupons', { method: 'POST', body: fd }); render(); }, 'تمت الإضافة');
-  if (id === 'mf') { $('#planbox').innerHTML = `<div class="box"><textarea id="plantxt" rows="22">${esc(makePlan(fd))}</textarea><button class="p" data-act="copyplan">نسخ الخطة</button> <button class="p" data-act="regen">إعادة إنشاء الاقتراحات</button> <button class="p" data-act="saveplan">حفظ الخطة</button><div class="muted">يمكنك تعديل النص مباشرة قبل النسخ أو الحفظ.</div></div>`; }
+  if (id === 'mf') { $('#planbox').innerHTML = `<div class="box"><textarea id="plantxt" rows="22">${esc(makePlan(fd))}</textarea><button class="p" data-act="copyplan">نسخ الخطة</button> <button class="p" data-act="regen">إعادة إنشاء الاقتراحات</button> ${me?.role === 'seller' ? '<button class="p" data-act="saveplan">حفظ الخطة</button>' : ''}<div class="muted">يمكنك تعديل النص مباشرة قبل النسخ أو الحفظ.</div></div>`; }
 });
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]'); if (!b || b.tagName === 'SELECT') return;
@@ -298,6 +307,7 @@ document.addEventListener('click', (e) => {
   if (act === 'canceledit') { editing = null; location.hash = '#seller'; }
   if (act === 'delp' && confirm('حذف المنتج نهائيًا؟')) again(() => api('/products/' + id, { method: 'DELETE' }), 'تم الحذف');
   if (act === 'ok' || act === 'no') again(() => api(`/products/${id}/review`, { method: 'PATCH', body: { approve: act === 'ok' } }), 'تم');
+  if (act === 'seed') again(() => api('/admin/seed', { method: 'POST' }), 'تم تحميل البيانات التجريبية');
   if (act === 'delcat') again(() => api('/categories/' + id, { method: 'DELETE' }));
   if (act === 'delcp') again(() => api('/coupons/' + id, { method: 'DELETE' }));
   if (act === 'delrv') again(() => api('/reviews/' + id, { method: 'DELETE' }));
