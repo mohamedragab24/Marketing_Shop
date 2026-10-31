@@ -1,29 +1,18 @@
 {
-  "name": "database-management-guide",
+  "name": "souqna-demo-store",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "packageManager": "npm@10.9.9",
   "engines": {
-    "node": ">=24.12.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "server": "node server/index.js",
-    "make-admin": "node server/make-admin.js",
-    "seed": "node server/seed.js"
-  },
-  "dependencies": {
-    "firebase": "13.1.0",
-    "express": "^4.21.2",
-    "firebase-admin": "^13.0.0"
+    "preview": "vite preview --host 0.0.0.0 --port 3000"
   },
   "devDependencies": {
     "vite": "8.3.5"
-  },
-  "overrides": {
-    "@grpc/grpc-js": "1.14.7"
   }
 }

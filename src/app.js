@@ -1,328 +1,280 @@
 import './ui.css';
-import { auth } from './firebase.js';
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
-const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const money = (n) => new Intl.NumberFormat('ar-EG').format(n) + ' ج.م';
-const ST = { new: 'جديد', reviewing: 'قيد المراجعة', confirmed: 'تم التأكيد', preparing: 'جاري التجهيز', shipped: 'تم الشحن', completed: 'مكتمل', cancelled: 'ملغي' };
-const PST = { draft: 'مسودة', pending: 'قيد المراجعة', published: 'منشور', rejected: 'مرفوض' };
-const r = (a) => a[Math.floor(Math.random() * a.length)];
-let me = null, authReady = false, catalog = {}, mine = {}, editing = null, favIds = new Set(), f = { q: '', category: '', sort: 'new' };
-let cart = JSON.parse(localStorage.getItem('cart') || '{}');
-const saveCart = () => localStorage.setItem('cart', JSON.stringify(cart));
-const isBuyer = () => me?.role === 'buyer';
-
-function toast(msg, bad) {
-  const t = $('#toast'); t.textContent = msg; t.style.background = bad ? '#dc2626' : '#0b2447'; t.style.display = 'block';
-  clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), 3000);
+const STORE_KEY = 'souqna-demo-store-v2';
+const STORE = '/app.html';
+const $ = (s, root = document) => root.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const cash = (v) => `${new Intl.NumberFormat('ar-EG').format(Number(v) || 0)} ج.م`;
+const random = (a) => a[Math.floor(Math.random() * a.length)];
+const uid = () => Math.random().toString(36).slice(2, 10);
+const count = (v) => Number(v || 0).toLocaleString('ar-EG');
+const demoProducts = [
+  { id:'demo-a1', name:'سماعة لاسلكية بإلغاء ضوضاء', category:'إلكترونيات', brand:'نغمة', price:1290, discountPrice:990, stock:24, views:318, sales:43, status:'published', emoji:'🎧', tone:'lavender', description:'سماعة لاسلكية عملية للاستماع اليومي والعمل، بتصميم مريح وسهل الحمل.', specs:'اتصال لاسلكي · شحن USB-C · ميكروفون مدمج', weight:'240 جم', dimensions:'18 × 16 × 7 سم', origin:'غير محدد', keywords:['سماعة','لاسلكي','صوت'], returnPolicy:'يمكن تعديل السياسة من صفحة المنتج', images:[] },
+  { id:'demo-a2', name:'حقيبة يومية بتصميم بسيط', category:'أزياء', brand:'خطوة', price:780, discountPrice:650, stock:15, views:246, sales:31, status:'published', emoji:'👜', tone:'peach', description:'حقيبة يومية بمساحة عملية وتفاصيل أنيقة للاستخدام داخل المدينة.', specs:'حجرة رئيسية · حزام قابل للتعديل', weight:'غير محدد', dimensions:'غير محدد', origin:'غير محدد', keywords:['حقيبة','أزياء','يومي'], returnPolicy:'يمكن تعديل السياسة من صفحة المنتج', images:[] },
+  { id:'demo-a3', name:'طقم أكواب قهوة سيراميك', category:'المنزل', brand:'بيت ودفا', price:540, discountPrice:0, stock:28, views:191, sales:22, status:'published', emoji:'☕', tone:'mint', description:'طقم أكواب يضيف لمسة دافئة إلى روتين القهوة اليومي.', specs:'طقم من قطعتين · مناسب للمشروبات الساخنة', weight:'غير محدد', dimensions:'غير محدد', origin:'غير محدد', keywords:['قهوة','أكواب','منزل'], returnPolicy:'يمكن تعديل السياسة من صفحة المنتج', images:[] },
+  { id:'demo-a4', name:'مصباح مكتب قابل للتعديل', category:'المنزل', brand:'نور', price:860, discountPrice:725, stock:9, views:174, sales:19, status:'published', emoji:'💡', tone:'blue', description:'إضاءة مكتبية بتصميم مرن تساعد على تنظيم مساحة العمل.', specs:'ذراع قابل للتعديل · زر تشغيل واضح', weight:'غير محدد', dimensions:'غير محدد', origin:'غير محدد', keywords:['مصباح','مكتب','إضاءة'], returnPolicy:'يمكن تعديل السياسة من صفحة المنتج', images:[] },
+  { id:'demo-a5', name:'زجاجة مياه حرارية', category:'رياضة', brand:'مدار', price:410, discountPrice:0, stock:37, views:123, sales:14, status:'published', emoji:'🧴', tone:'mint', description:'زجاجة سهلة الحمل تناسب التنقل والأنشطة اليومية.', specs:'غطاء محكم · فتحة واسعة للتنظيف', weight:'غير محدد', dimensions:'غير محدد', origin:'غير محدد', keywords:['زجاجة','رياضة','مياه'], returnPolicy:'يمكن تعديل السياسة من صفحة المنتج', images:[] },
+  { id:'demo-a6', name:'دفتر ملاحظات بغلاف قماشي', category:'قرطاسية', brand:'ورقة', price:195, discountPrice:165, stock:42, views:108, sales:12, status:'published', emoji:'📔', tone:'peach', description:'دفتر أنيق لتدوين الأفكار وتنظيم المهام في العمل أو الدراسة.', specs:'ورق مسطر · إغلاق مطاطي', weight:'غير محدد', dimensions:'غير محدد', origin:'غير محدد', keywords:['دفتر','قرطاسية','ملاحظات'], returnPolicy:'يمكن تعديل السياسة من صفحة المنتج', images:[] },
+];
+function readState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+    const user=saved?.user||null, accounts=saved?.accounts||{};
+    if(user?.role) accounts[user.role]=user;
+    return { products:Array.isArray(saved?.products) && saved.products.length ? saved.products : demoProducts, cart:saved?.cart || {}, orders:saved?.orders || [], user, accounts, plans:saved?.plans || [], favorites:saved?.favorites || [] };
+  } catch { return { products:demoProducts, cart:{}, orders:[], user:null, accounts:{}, plans:[], favorites:[] }; }
 }
-async function api(path, opts = {}) {
-  const headers = { 'Content-Type': 'application/json' };
-  const u = auth.currentUser;
-  if (u && !u.isAnonymous) headers.Authorization = 'Bearer ' + (await u.getIdToken());
-  const res = await fetch('/api' + path, { ...opts, headers, body: opts.body && JSON.stringify(opts.body) });
-  const d = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(d.error || 'حدث خطأ');
-  return d;
+let data = readState();
+let timer, query = '', categoryFilter = '', selectedFiles = [];
+const mode = document.body.dataset.mode || 'store';
+const statusSteps = [['new','تم استلام الطلب'],['confirmed','تم التأكيد'],['preparing','قيد التجهيز'],['shipped','في الطريق'],['completed','تم التسليم']];
+function persist() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); return true; }
+  catch { toast('تعذّر الحفظ المحلي. جرّب صورًا أصغر أو احذف صورًا قديمة.', true); return false; }
 }
-
-const MODE = document.body.dataset.mode || 'store';
-const ALLOW = { store: ['store', 'product', 'cart', 'favorites', 'orders', 'notifications', 'profile', 'login', 'er'], marketing: ['marketing'], seller: ['seller', 'newproduct', 'marketing', 'admin', 'orders', 'notifications', 'profile', 'login', 'er'] };
-const dflt = () => (MODE === 'seller' ? (me ? (me.role === 'admin' ? 'admin' : 'seller') : 'login') : MODE === 'marketing' ? 'marketing' : 'store');
-const home = () => (MODE === 'seller' ? (me?.role === 'admin' ? '#admin' : '#seller') : '#store');
-const goStore = () => (['', '#store'].includes(location.hash) ? render() : (location.hash = '#store'));
-
+function toast(message, error = false) {
+  const el = $('#toast'); if (!el) return;
+  el.textContent = message; el.classList.toggle('toast-error', error); el.classList.add('toast-visible');
+  clearTimeout(timer); timer = setTimeout(() => el.classList.remove('toast-visible'), 3200);
+}
+function roleLabel(role) { return role === 'seller' ? 'بائع' : 'مشتري'; }
+function startDemo(role) {
+  if(data.accounts?.[role]) {
+    data.user=data.accounts[role];
+    persist(); render(); toast(`رجعناك لحساب ${roleLabel(role)} التجريبي.`); return;
+  }
+  const first = random(['نور','ياسين','مريم','عمر','سلمى','آدم','ليلى','زياد','جنى','مالك']);
+  const family = random(['محمود','حسن','علي','إبراهيم','فؤاد','منصور','سامي','خالد']);
+  const email = `demo-${uid()}@example.test`, password = `${Math.random().toString(36).slice(2,7)}${Math.floor(100 + Math.random()*900)}`;
+  const previous=data.user;
+  data.user = { id:`user-${uid()}`, name:`${first} ${family}`, role, email, password, phone:`01${Math.floor(100000000 + Math.random()*900000000)}`, storeName:role === 'seller' ? `${first} ستوديو` : '', addresses:role === 'buyer' ? ['القاهرة، عنوان تجريبي'] : [] };
+  data.accounts[role]=data.user;
+  if(!persist()){data.user=previous;delete data.accounts[role];return;}
+  render(); toast(`أهلًا ${data.user.name} — تم تجهيز حساب ${roleLabel(role)} تجريبي.`);
+}
+function logout() { data.user = null; persist(); location.href = `${STORE}#login`; }
 function nav() {
-  const role = me?.role, n = Object.keys(cart).length;
-  if (MODE === 'seller') {
-    const L = role === 'admin' ? [['admin', '📊', 'لوحة المدير'], ['seller', '📦', 'كل المنتجات'], ['orders', '🧾', 'الطلبات'], ['notifications', '🔔', 'الإشعارات'], ['profile', '👤', 'حسابي'], ['er', '🗄', 'قاعدة البيانات']]
-      : role === 'seller' ? [['seller', '📦', 'منتجاتي'], ['newproduct', '➕', 'إضافة منتج'], ['orders', '🧾', 'الطلبات'], ['marketing', '🚀', 'مساعد التسويق'], ['notifications', '🔔', 'الإشعارات'], ['profile', '👤', 'بيانات المتجر']] : [];
-    const cur = (location.hash || '').slice(1).split('/')[0];
-    $('#nav').innerHTML = '<div class="brand">🏪 بوابة البائعين</div>' + L.map(([k, i, l]) => `<a href="#${k}" class="${cur === k ? 'on' : ''}">${i} ${l}</a>`).join('') + '<a href="/app.html">🛍 الذهاب إلى المتجر</a><a href="/">📚 الشرح التعليمي</a>' + (me ? `<button data-act="logout">خروج (${esc(me.name)})</button>` : '');
-    return;
+  const role = data.user?.role, cartCount = Object.values(data.cart).reduce((n, item) => n + item.qty, 0);
+  $('#nav').innerHTML = `<div class="nav-shell"><a class="brand" href="${STORE}#store" aria-label="سوقنا - الرئيسية"><span class="brand-icon">س</span><span><strong>سوقنا</strong><small>تجربة متجر محلية</small></span></a>
+    <button class="mobile-menu" type="button" data-act="menu" aria-label="فتح القائمة">☰</button>
+    <nav class="nav-links" id="nav-links" aria-label="التنقل الرئيسي"><a href="${STORE}#store" class="${mode==='store'?'nav-current':''}">الرئيسية</a><a href="/marketing.html#marketing" class="${mode==='marketing'?'nav-current':''}">التسويق</a><a href="/seller.html#seller" class="${mode==='seller'?'nav-current':''}">لوحة البائع</a><a href="${STORE}#database">🗄 <span>البيانات</span></a></nav>
+    <div class="nav-actions">${role?`<a class="nav-icon" href="${STORE}#orders" aria-label="طلباتي" title="طلباتي">🧾</a>`:""}<a class="nav-icon" href="${STORE}#cart" aria-label="السلة" title="السلة">🛒 <b>${cartCount}</b></a>
+    ${role ? `<a class="user-pill" href="${STORE}#profile"><span class="avatar">${esc(data.user.name.slice(0,1))}</span><span>${esc(data.user.name)}<small>${roleLabel(role)} تجريبي</small></span></a><button class="nav-logout" data-act="logout">خروج</button>` : `<a class="button button-small button-primary" href="${STORE}#login">ابدأ تجربة مجانية</a>`}</div></div>`;
+}
+function imageView(product, extra='') {
+  if (product.images?.[0]) return `<div class="product-image ${extra}"><img src="${esc(product.images[0])}" alt="${esc(product.name)}" loading="lazy"></div>`;
+  return `<div class="product-image art-${esc(product.tone || 'blue')} ${extra}"><span>${esc(product.emoji || '📦')}</span><small>${esc(product.category || 'منتج')}</small></div>`;
+}
+function productCard(p) {
+  const sale = Number(p.discountPrice)>0 && Number(p.discountPrice)<Number(p.price);
+  return `<article class="product-card"><a class="product-card-link" href="${STORE}#product/${encodeURIComponent(p.id)}" aria-label="عرض ${esc(p.name)}">${sale?'<span class="sale-pill">عرض</span>':''}${imageView(p)}</a><div class="product-meta"><span>${esc(p.category || 'منتج')}</span><button class="favorite-button" data-act="favorite" data-id="${esc(p.id)}" aria-label="إضافة للمفضلة">${data.favorites.includes(p.id)?'♥':'♡'}</button></div><a class="product-name" href="${STORE}#product/${encodeURIComponent(p.id)}">${esc(p.name)}</a><div class="product-price"><strong>${cash(sale?p.discountPrice:p.price)}</strong>${sale?`<del>${cash(p.price)}</del>`:''}</div><button class="button button-dark button-full" data-act="add" data-id="${esc(p.id)}" ${Number(p.stock)<=0?'disabled':''}>أضف للسلة <span>＋</span></button></article>`;
+}
+function productList(products) { return products.length?`<div class="product-grid">${products.map(productCard).join('')}</div>`:'<div class="empty-state">لا توجد نتائج الآن. جرّب كلمة أخرى أو اختر قسمًا مختلفًا.</div>'; }
+function storePage() {
+  const all = data.products.filter((p)=>p.status!=='draft');
+  const categories = [...new Set(all.map((p)=>p.category).filter(Boolean))];
+  const shown = all.filter((p)=>(!categoryFilter||p.category===categoryFilter)&&(!query||`${p.name} ${p.category} ${p.brand}`.toLocaleLowerCase('ar').includes(query.toLocaleLowerCase('ar'))));
+  return `<section class="store-hero"><div class="hero-blob hero-blob-one"></div><div class="hero-blob hero-blob-two"></div><div class="hero-copy"><span class="eyebrow"><i></i> اختيارات يومية، تجربة أسهل</span><h1>كل اللي بتحبه،<br><em>في مكان واحد.</em></h1><p>اكتشف منتجات مميزة من بائعين مستقلين، وجرّب رحلة الشراء خطوة بخطوة.</p><div class="hero-buttons"><a class="button button-primary" href="#catalog">اكتشف المنتجات <span>←</span></a><a class="text-link" href="/seller.html#seller">عندك منتج؟ ابدأ البيع</a></div><div class="hero-proof"><span>✦</span><div><b>${all.length} منتجات معروضة</b><small>تجربة متجر محلية بلا دفع حقيقي</small></div></div></div><div class="hero-showcase"><div class="showcase-card showcase-back">✦ <small>منتجات مختارة</small><b>كل يوم، اكتشاف جديد</b></div><div class="showcase-orbit"></div><div class="showcase-product">👜</div><div class="showcase-tag">اختيار الأسبوع <b>♡</b></div><div class="showcase-note"><span>✳</span><div><b>اختاري براحتك</b><small>السلة والطلبات تجريبية</small></div></div></div></section>
+  <main class="page-wrap"><section class="benefit-strip"><div><span>♧</span><b>تسوّق مريح</b><small>استكشف الأقسام بسهولة</small></div><div><span>✧</span><b>تجربة آمنة</b><small>لا توجد عمليات دفع فعلية</small></div><div><span>↗</span><b>دعم البائعين</b><small>منتجات من متاجر مستقلة</small></div></section>
+  <section class="catalog-section" id="catalog"><div class="section-title-row"><div><span class="section-kicker">تصفّح على مزاجك</span><h2>منتجات تستحق الاكتشاف</h2><p>اختيارات بسيطة لأيام أجمل.</p></div><form class="catalog-search" id="search-form"><input name="q" value="${esc(query)}" placeholder="ابحث عن منتج…" aria-label="ابحث عن منتج"><button aria-label="بحث">⌕</button></form></div><div class="category-row"><button class="category-chip ${!categoryFilter?'selected':''}" data-act="category" data-id="">الكل</button>${categories.map((c)=>`<button class="category-chip ${categoryFilter===c?'selected':''}" data-act="category" data-id="${esc(c)}">${esc(c)}</button>`).join('')}</div>${productList(shown)}</section>
+  <section class="seller-callout"><div><span class="section-kicker">للبائعين</span><h2>عندك منتج يستحق الظهور؟</h2><p>جهّز صفحة منتجك، ارفع صوره، وخلي مساعد الكتابة يساعدك في التفاصيل.</p></div><a class="button button-primary" href="/seller.html#seller">افتح لوحة البائع <span>←</span></a></section><section class="closing-note"><span>✳</span><p><b>ملاحظة:</b> هذه نسخة عرض محلية. الحسابات والمنتجات والطلبات تُحفظ في متصفحك فقط، ولا يوجد دفع أو اتصال بقاعدة بيانات.</p></section></main>`;
+}
+function productPage(id) {
+  const p = data.products.find((x)=>x.id===id);
+  if (!p) return `<main class="page-wrap"><div class="empty-state"><h2>المنتج غير موجود</h2><a class="button button-primary" href="${STORE}#store">العودة للمتجر</a></div></main>`;
+  const sale = Number(p.discountPrice)>0&&Number(p.discountPrice)<Number(p.price);
+  return `<main class="page-wrap product-detail"><a class="back-link" href="${STORE}#store">← العودة للمنتجات</a><div class="detail-layout"><div>${imageView(p,'detail-image')}<div class="closing-note"><span>✳</span><p>الصور والبيانات في هذه التجربة تبقى محفوظة على جهازك.</p></div></div><section class="detail-copy"><span class="section-kicker">${esc(p.category||'منتج')} · ${esc(p.brand||'اختيار مميز')}</span><h1>${esc(p.name)}</h1><div class="detail-price"><strong>${cash(sale?p.discountPrice:p.price)}</strong>${sale?`<del>${cash(p.price)}</del><span class="sale-pill">عرض خاص</span>`:''}</div><p class="detail-description">${esc(p.description||'وصف المنتج غير متوفر.')}</p><div class="availability">${Number(p.stock)>0?`متوفر · ${count(p.stock)} قطعة`:'غير متوفر حاليًا'}</div><div class="detail-facts"><div><small>العلامة</small><b>${esc(p.brand||'غير محدد')}</b></div><div><small>الوزن</small><b>${esc(p.weight||'غير محدد')}</b></div><div><small>الأبعاد</small><b>${esc(p.dimensions||'غير محدد')}</b></div><div><small>المنشأ</small><b>${esc(p.origin||'غير محدد')}</b></div></div><h3>المواصفات</h3><p>${esc(p.specs||'لم تُضف مواصفات بعد.')}</p><p class="policy"><b>سياسة الإرجاع:</b> ${esc(p.returnPolicy||'تُحدد مع البائع.')}</p><div class="detail-actions"><button class="button button-primary" data-act="add" data-id="${esc(p.id)}" ${Number(p.stock)<=0?'disabled':''}>أضف للسلة <span>＋</span></button><button class="button button-outline" data-act="favorite" data-id="${esc(p.id)}">${data.favorites.includes(p.id)?'♥ في المفضلة':'♡ أضف للمفضلة'}</button></div>${p.sellerId===data.user?.id?'<p class="demo-note">هذا منتجك التجريبي.</p>':''}</section></div></main>`;
+}
+function demoLogin() {
+  const credentials = data.user?`<div class="credential-card"><div><span class="success-dot"></span><b>حسابك الحالي تجربة فقط</b></div><p>البريد التجريبي: <code>${esc(data.user.email)}</code></p><p>كلمة المرور التجريبية: <code>${esc(data.user.password)}</code></p><button class="button button-outline" data-act="logout">إنهاء التجربة الحالية</button></div>`:'';
+  return `<main class="page-wrap auth-page"><div class="auth-intro"><span class="eyebrow"><i></i> ابدأ التجربة في ثوانٍ</span><h1>جرّب سوقنا<br><em>بدون تسجيل حقيقي.</em></h1><p>اختر دورك، وسننشىء لك بيانات وهمية عشوائية لتجربة المتجر. لا نطلب بريدك ولا نرسل كلمة مرور. لا تستخدم بيانات شخصية أو كلمة مرور حقيقية.</p><div class="auth-safe"><span>🔒</span><div><b>بيانات تجريبية فقط</b><small>تخزين تجريبي غير مشفّر؛ تجنّب البيانات الحقيقية</small></div></div></div><div class="role-cards"><button class="role-card" data-act="start-demo" data-role="buyer"><span class="role-emoji">🛍️</span><small>تجربة التسوّق</small><b>ابدأ كمشتري</b><span>تصفّح، أضف للسلة، وتابع طلبك</span><i>ابدأ التجربة ←</i></button><button class="role-card role-card-seller" data-act="start-demo" data-role="seller"><span class="role-emoji">✳</span><small>تجربة البيع</small><b>ابدأ كبائع</b><span>أضف منتجًا وجهّز خطتك التسويقية</span><i>افتح لوحة البائع ←</i></button></div>${credentials}</main>`;
+}
+function cartPage() {
+  const lines = Object.entries(data.cart).map(([id,item])=>({id,...item,product:data.products.find((p)=>p.id===id)})).filter((item)=>item.product);
+  const total = lines.reduce((sum,item)=>sum+item.price*item.qty,0);
+  if (!lines.length) return `<main class="page-wrap"><div class="section-heading"><span class="section-kicker">سلتك</span><h1>لسه ما اخترتش حاجة</h1><p>تصفّح المنتجات، وأضف اللي يعجبك للسلة.</p><a class="button button-primary" href="${STORE}#store">اكتشف المنتجات <span>←</span></a></div></main>`;
+  return `<main class="page-wrap"><div class="section-heading"><span class="section-kicker">اختياراتك</span><h1>سلة التسوّق</h1><p>راجع التفاصيل قبل تأكيد طلبك التجريبي.</p></div><div class="cart-layout"><div class="cart-list">${lines.map((item)=>`<article class="cart-row">${imageView(item.product)}<div class="cart-info"><b>${esc(item.product.name)}</b><small>${cash(item.price)} للقطعة</small><div class="quantity"><button data-act="quantity" data-id="${esc(item.id)}" data-delta="-1">−</button><b>${item.qty}</b><button data-act="quantity" data-id="${esc(item.id)}" data-delta="1">＋</button><button class="remove-link" data-act="remove-cart" data-id="${esc(item.id)}">إزالة</button></div></div><strong>${cash(item.price*item.qty)}</strong></article>`).join('')}</div><aside class="summary-card"><span>ملخص الطلب</span><div><small>المنتجات</small><b>${cash(total)}</b></div><div><small>الشحن</small><b>تجريبي</b></div><hr><div class="summary-total"><small>الإجمالي</small><b>${cash(total)}</b></div>${data.user?.role==='buyer'?`<form id="checkout-form"><label for="shipping-address">عنوان تجريبي</label><input id="shipping-address" name="address" value="${esc(data.user.addresses?.[0]||'')}" placeholder="اكتب عنوانًا تجريبيًا" required><button class="button button-primary button-full">تأكيد الطلب التجريبي</button></form>`:`<a class="button button-primary button-full" href="${STORE}#login">أنشئ مشتريًا تجريبيًا لإتمام الطلب</a>`}<p class="fine-print">لن يتم تحصيل أي مبلغ. الطلب يبقى على هذا الجهاز فقط.</p></aside></div></main>`;
+}
+function orderProgress(status) {
+  if (status==='cancelled') return '<div class="cancelled-state">تم إلغاء هذا الطلب التجريبي</div>';
+  const current = statusSteps.findIndex(([key])=>key===status);
+  return `<div class="order-progress">${statusSteps.map(([key,label],i)=>`<div class="progress-step ${i<=current?'step-done':''}"><i>${i<current?'✓':i+1}</i><small>${label}</small></div>`).join('')}</div>`;
+}
+function ordersPage() {
+  if (!data.user) return `<main class="page-wrap"><div class="section-heading"><h1>طلباتي</h1><p>ابدأ تجربة كمشتري لمتابعة الطلبات.</p><a class="button button-primary" href="${STORE}#login">ابدأ كمشتري</a></div></main>`;
+  const orders = data.user.role==='buyer'?data.orders.filter((o)=>o.buyerId===data.user.id):data.orders.filter((o)=>o.items.some((item)=>item.sellerId===data.user.id));
+  return `<main class="page-wrap"><div class="section-heading"><span class="section-kicker">متابعة واضحة</span><h1>${data.user.role==='buyer'?'طلباتي التجريبية':'طلبات متجري'}</h1><p>كل المراحل محاكاة محلية للتجربة.</p></div>${orders.length?`<div class="orders-list">${orders.slice().reverse().map((o)=>`<article class="order-card"><div class="order-card-head"><div><small>رقم الطلب التجريبي</small><b>${esc(o.number)}</b></div><span class="order-status">${esc(o.statusLabel)}</span><strong>${cash(o.total)}</strong></div><div class="order-items">${o.items.filter((item)=>data.user.role==='buyer'||item.sellerId===data.user.id).map((item)=>`<span>${esc(item.name)} <b>× ${item.qty}</b></span>`).join('')}</div><div class="muted-line">${data.user.role==='buyer'?'عنوان التسليم التجريبي: '+esc(o.address):'المشتري: '+esc(o.buyerName)}</div>${orderProgress(o.status)}${data.user.role==='seller'&&o.status!=='completed'&&o.status!=='cancelled'?`<button class="button button-outline" data-act="advance-order" data-id="${esc(o.id)}">تحديث المرحلة التالية ←</button>`:''}</article>`).join('')}</div>`:'<div class="empty-state"><h2>لا توجد طلبات حتى الآن</h2><p>أنشئ طلبًا تجريبيًا من السلة لتظهر خطوات المتابعة هنا.</p><a class="button button-outline" href="/app.html#store">تصفّح المنتجات</a></div>'}</main>`;
+}
+function profilePage() {
+  if (!data.user) return `<main class="page-wrap"><div class="section-heading"><h1>ملفي التجريبي</h1><p>ابدأ تجربة لمشاهدة ملفك.</p><a class="button button-primary" href="${STORE}#login">ابدأ التجربة</a></div></main>`;
+  return `<main class="page-wrap"><div class="section-heading"><span class="section-kicker">بيانات محلية</span><h1>ملفي التجريبي</h1><p>يمكنك تعديل اسم العرض. الحساب ليس حقيقيًا ولا يوجد تسجيل دخول إلى خادم.</p></div><form class="form-card narrow-form" id="profile-form"><label>اسم العرض<input name="name" value="${esc(data.user.name)}" required></label><label>الدور<input value="${roleLabel(data.user.role)}" disabled></label><label>البريد العشوائي التجريبي<input value="${esc(data.user.email)}" disabled></label>${data.user.role==='seller'?`<label>اسم المتجر<input name="storeName" value="${esc(data.user.storeName)}"></label>`:`<label>عنوان تجريبي<input name="address" value="${esc(data.user.addresses?.[0]||'')}"></label>`}<button class="button button-primary">حفظ التعديلات</button><button type="button" class="button button-outline" data-act="logout">إنهاء التجربة</button></form></main>`;
+}
+function sellerDashboard() {
+  if (data.user?.role!=='seller') return `<main class="page-wrap"><div class="seller-welcome"><span class="section-kicker">مساحة البائع</span><h1>أطلق عرضك<br><em>بطريقتك.</em></h1><p>جهّز منتجك وصوره وخطة تسويقه في مكان واحد.</p><button class="button button-primary" data-act="start-demo" data-role="seller">ابدأ كبائع تجريبي <span>←</span></button></div></main>`;
+  const products=data.products.filter((p)=>p.sellerId===data.user.id), orders=data.orders.filter((o)=>o.items.some((i)=>i.sellerId===data.user.id));
+  const sales=orders.reduce((sum,o)=>sum+o.items.filter((i)=>i.sellerId===data.user.id).reduce((sub,i)=>sub+i.price*i.qty,0),0);
+  return `<main class="page-wrap seller-page"><div class="dash-heading"><div><span class="section-kicker">مساحة البائع</span><h1>أهلًا ${esc(data.user.name)} <span>✳</span></h1><p>دي مساحة تجريبية لترتيب منتجاتك ومتابعة طلباتك.</p></div><button class="button button-primary" data-act="new-product">＋ أضف منتجًا</button></div><div class="stat-grid"><article><span>📦</span><small>منتجاتي</small><b>${products.length}</b></article><article><span>🛒</span><small>الطلبات</small><b>${orders.length}</b></article><article><span>👁</span><small>مشاهدات تجريبية</small><b>${products.reduce((n,p)=>n+(p.views||0),0)}</b></article><article><span>✦</span><small>قيمة الطلبات</small><b>${cash(sales)}</b></article></div><div class="seller-shortcuts"><a href="/marketing.html#marketing"><span>✦</span><div><b>خطة تسويق ذكية</b><small>اقتراحات محتوى وخطوات عملية لمنتجك</small></div><i>←</i></a><a href="/app.html#orders"><span>↗</span><div><b>متابعة الطلبات</b><small>اعرف المرحلة التالية لكل طلب</small></div><i>←</i></a></div><div class="section-title-row seller-products-title"><div><span class="section-kicker">إدارة المخزون</span><h2>منتجاتك</h2></div></div>${products.length?`<div class="seller-product-list">${products.map((p)=>`<article class="seller-product-row">${imageView(p)}<div class="seller-product-info"><b>${esc(p.name)}</b><small>${esc(p.category)} · مخزون ${count(p.stock)}</small><strong>${cash(p.price)} <span class="status-tag ${p.status==='published'?'status-live':''}">${p.status==='published'?'معروض':'مسودة'}</span></strong></div><button class="button button-outline" data-act="edit-product" data-id="${esc(p.id)}">تعديل</button><button class="icon-danger" data-act="delete-product" data-id="${esc(p.id)}" aria-label="حذف المنتج">×</button></article>`).join('')}</div>`:'<div class="empty-state"><h2>ابدأ بأول منتج</h2><p>أضف صورة وتفاصيل المنتج، ثم جهّز اقتراحات التسويق.</p><button class="button button-primary" data-act="new-product">＋ أضف منتجك الأول</button></div>'}</main>`;
+}
+const productFields=[['name','اسم المنتج','مثال: حقيبة يومية بتصميم بسيط','text',true],['price','السعر الأساسي بالجنيه','0','number',true],['discountPrice','سعر العرض (اختياري)','اتركه فارغًا بدون خصم','number',false],['stock','الكمية المتاحة','مثال: 12','number',true],['category','التصنيف','إلكترونيات، أزياء، منزل…','text',true],['brand','العلامة التجارية','اسم العلامة أو غير محدد','text',false],['weight','الوزن','مثال: 250 جم أو غير محدد','text',false],['dimensions','الأبعاد','مثال: 20 × 12 × 5 سم','text',false],['origin','بلد المنشأ','بلد المنشأ أو غير محدد','text',false],['keywords','كلمات مفتاحية','افصل الكلمات بفواصل','text',false],['returnPolicy','سياسة الاستبدال والإرجاع','اكتب سياستك أو غير محدد','text',false]];
+function productForm() {
+  if(data.user?.role!=='seller') return `<main class="page-wrap"><div class="empty-state"><h2>ابدأ كتاجر تجريبي لإضافة منتج</h2><button class="button button-primary" data-act="start-demo" data-role="seller">ابدأ كتاجر تجريبي</button></div></main>`;
+  const p=data.products.find((entry)=>entry.id===data.editingId)||{};
+  const fields=productFields.map(([key,label,placeholder,type,required])=>`<label class="field-${key}">${label}${required?' <span class="required">*</span>':''}<input name="${key}" type="${type}" ${type==='number'?'min="0" step="any"':''} placeholder="${esc(placeholder)}" value="${esc(p[key]??'')}" ${required?'required':''}></label>`).join('');
+  const current=p.images||[]; selectedFiles=[];
+  return `<main class="page-wrap form-page"><a class="back-link" href="/seller.html#seller">← لوحة البائع</a><div class="form-intro"><span class="section-kicker">${p.id?'تحديث المنتج':'منتج جديد'}</span><h1>${p.id?'تعديل التفاصيل':'خلّي منتجك يبان.'}</h1><p>اكتب المعلومات المؤكدة. المساعد يقترح صياغة أفضل، وأنت تراجعها قبل الحفظ.</p></div><form id="product-form" class="product-form">
+    <section class="form-card"><div class="form-section-heading"><span>01</span><div><h2>صور المنتج</h2><p>صورة واضحة بتساعد المشتري يتعرف على منتجك.</p></div></div><div class="upload-box" id="upload-dropzone"><div class="upload-icon">↥</div><b>اسحب الصور هنا أو اختر من جهازك</b><small>حتى 4 صور · الصور تبقى محفوظة على جهازك في هذا النموذج</small><label class="button button-outline upload-button" for="product-images">اختر الصور</label><input id="product-images" name="imageFiles" type="file" accept="image/*" multiple hidden><div id="image-preview" class="upload-preview">${current.map((img)=>`<img src="${esc(img)}" alt="صورة المنتج">`).join('')}</div></div></section>
+    <section class="form-card"><div class="form-section-heading"><span>02</span><div><h2>معلومات المنتج</h2><p>التفاصيل الأساسية والسعر والمخزون.</p></div><div class="completion"><b id="completion-value">0٪</b><small>اكتمال الحقول</small></div></div><div class="form-grid">${fields}</div><div class="assistant-box"><div class="assistant-head"><span>✦</span><div><b>مساعد الكتابة الذكي</b><small>اقتراحات محلية تجريبية — راجع صحة أي معلومة قبل النشر.</small></div></div><div class="assistant-actions"><button type="button" class="button button-outline" data-act="suggest-product">✦ اقترح المعلومات الناقصة</button><button type="button" class="button button-ghost" data-act="polish-product">تصحيح وتحسين النص</button></div></div></section>
+    <section class="form-card"><div class="form-section-heading"><span>03</span><div><h2>الوصف والمواصفات</h2><p>قدّم معلومات صادقة وواضحة عن المنتج.</p></div></div><label>وصف المنتج<textarea name="description" rows="4" placeholder="ما الذي يميز المنتج؟ اكتب معلومات دقيقة.">${esc(p.description||'')}</textarea></label><label>المواصفات<textarea name="specs" rows="3" placeholder="الخامة، طريقة الاستخدام، المحتويات…">${esc(p.specs||'')}</textarea></label><div class="form-actions"><label class="publish-check"><input name="publish" type="checkbox" ${p.status==='published'||!p.id?'checked':''}> عرض المنتج في واجهة المتجر التجريبية</label><button class="button button-primary">${p.id?'حفظ التعديلات':'حفظ المنتج'} <span>←</span></button><button type="button" class="button button-outline" data-act="preview-product">معاينة</button></div><div id="product-preview"></div></section></form></main>`;
+}
+function cleanText(v) { return String(v||'').replace(/\s+/g,' ').replace(/\s+([،,.!?؟])/g,'$1').replace(/([،,.!?؟]){2,}/g,'$1').trim(); }
+function fixText(value) {
+  const fixes={جوده:'جودة',مميزز:'مميز',منتجج:'منتج',المنتجج:'المنتج',سريعه:'سريعة',عمليه:'عملية',اقتصاديه:'اقتصادية',مريحه:'مريحة',متينه:'متينة',ممتازه:'ممتازة','للاستخدام اليومى':'للاستخدام اليومي'};
+  return cleanText(value).replace(/جوده|مميزز|منتجج|المنتجج|سريعه|عمليه|اقتصاديه|مريحه|متينه|ممتازه|للاستخدام اليومى/g,(word)=>fixes[word]);
+}
+function suggestMissing(form) {
+  const field=(key)=>form.elements[key], name=fixText(field('name')?.value||'');
+  if(field('name')) field('name').value=name;
+  let category=cleanText(field('category')?.value||'');
+  if(!category&&name){const s=name.toLocaleLowerCase('ar'); category=/سماعة|هاتف|شاحن|إلكترون|بلوتوث/.test(s)?'إلكترونيات':/حقيبة|ملابس|قميص|حذاء/.test(s)?'أزياء':/كوب|مصباح|منزل|مطبخ/.test(s)?'المنزل':'منتجات متنوعة';field('category').value=category;}
+  if(field('brand')&&!field('brand').value.trim()) field('brand').value='غير محدد';
+  for(const key of ['weight','dimensions','origin']) if(field(key)&&!field(key).value.trim()) field(key).value='غير محدد';
+  if(field('returnPolicy')&&!field('returnPolicy').value.trim()) field('returnPolicy').value='تُحدد سياسة الاستبدال والإرجاع مع البائع';
+  if(field('keywords')&&!field('keywords').value.trim()&&name) field('keywords').value=[...new Set([name,category,'تسوق أونلاين'])].join('، ');
+  if(field('description')&&!field('description').value.trim()&&name) field('description').value=`${name} من فئة ${category||'منتجات متنوعة'}. أضف هنا تفاصيل الاستخدام والخامة والمميزات المؤكدة قبل النشر.`;
+  if(field('specs')&&!field('specs').value.trim()) field('specs').value='أضف الخامة والمقاس ومحتويات العبوة ومعلومات الاستخدام المؤكدة.';
+  updateCompletion(form);toast('أضفنا اقتراحات أولية. راجعها وأكمل الحقول التي تحتاج بيانات دقيقة.');
+}
+function polishForm(form) {
+  for(const key of ['name','brand','weight','dimensions','origin','keywords','returnPolicy','description','specs']) if(form.elements[key]?.value) form.elements[key].value=fixText(form.elements[key].value);
+  updateCompletion(form);toast('نقّحنا المسافات وبعض الأخطاء الشائعة محليًا.');
+}
+function updateCompletion(form) {
+  const el=$('#completion-value'); if(!el||!form)return;
+  const fields=['name','price','stock','category','brand','keywords','returnPolicy','description','specs'];
+  const completed=fields.filter((key)=>String(form.elements[key]?.value||'').trim()).length+((form.elements.imageFiles?.files?.length||data.products.find((entry)=>entry.id===data.editingId)?.images?.length)?1:0);
+  el.textContent=`${Math.round(completed/(fields.length+1)*100)}٪`;
+}
+function fileToSmallJpeg(file) {
+  return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(new Error('تعذرت قراءة الصورة'));reader.onload=()=>{const image=new Image();image.onerror=()=>reject(new Error('صيغة الصورة غير مدعومة'));image.onload=()=>{const scale=Math.min(1,980/Math.max(image.width,image.height)),canvas=document.createElement('canvas');canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',.68));};image.src=reader.result;};reader.readAsDataURL(file);});
+}
+function campaignText(p) {
+  const name=cleanText(p.name)||'منتجك', category=cleanText(p.category)||'الفئة', price=Number(p.price)||0;
+  const audience=category==='إلكترونيات'?'الأشخاص المهتمون بالتقنية والاستخدام اليومي':category==='أزياء'?'المهتمون بالموضة العملية والاختيارات اليومية':category==='المنزل'?'الأسر ومحبو ترتيب المساحات المنزلية':`المهتمون بفئة ${category} والتسوق عبر الهاتف`;
+  const keywords=[...new Set([name,category,p.brand,`شراء ${category}`,'تسوق أونلاين'].filter(Boolean))].join('، ');
+  const priceIdea=price?`${cash(Math.round(price*.95))} إلى ${cash(Math.round(price*1.08))} كتجربة اختبارية فقط، بعد حساب التكلفة وهامش الربح.`:'أضف السعر والتكلفة ثم قارِن بثلاثة منتجات مشابهة قبل تحديد السعر.';
+  return `خطة تسويق تجريبية — ${name}\n━━━━━━━━━━━━━━━━━━━━\n\n01 | الجمهور المقترح\n${audience}. اختبر الفئة على منشورين مختلفين، ولا تعتبرها نتيجة بحث سوق حقيقية.\n\n02 | الرسالة والعنوان\n${name} — اختيار عملي ليومك\n${cleanText(p.description)||'أظهر الفائدة المؤكدة للمنتج مع صورة واضحة ومعلومة عملية.'}\n\n03 | السعر\n${priceIdea}\n\n04 | كلمات البحث (SEO)\n${keywords}\nأضف اسم العلامة أو المقاس إن كان مؤكدًا، ولا تستخدم ادعاءات غير موثّقة.\n\n05 | نصوص جاهزة للتعديل\n• وصل ${name} — شاهد التفاصيل واختر اللي يناسبك.\n• بتدور على ${category}؟ تعرّف على ${name} ومواصفاته.\n• لقطة قريبة + معلومة واحدة مؤكدة + رابط صفحة المنتج.\n\n06 | خطوات العمل خلال 30 يومًا\nالأسبوع 1: راجع الصورة والعنوان والوصف، واطلب من شخصين قراءة الصفحة.\nالأسبوع 2: انشر مقطعين قصيرين يوضحان الاستخدام الحقيقي بدون مبالغة.\nالأسبوع 3: جرّب عرضًا محدود المدة بعد حساب هامش الربح وتكلفة الشحن.\nالأسبوع 4: قارن المشاهدات والنقرات والطلبات التجريبية، وكرّر المحتوى الأوضح.\n\n07 | جدول نشر أسبوعي مقترح\nالسبت: صورة المنتج + فائدة واحدة.\nالاثنين: إجابة سؤال شائع عن المقاس أو الاستخدام.\nالأربعاء: فيديو قصير يوضح التفاصيل الواقعية.\nالجمعة: تذكير بالعروض أو رابط صفحة المنتج.\n\n08 | مؤشرات للمتابعة\nنسبة النقر إلى صفحة المنتج · الإضافة للسلة · اكتمال الطلب · رسائل الاستفسار. دوّن الأرقام الفعلية أسبوعيًا ولا تفترض أن التفاعل يساوي المبيعات.\n\n⚠ هذه اقتراحات عامة محلية وليست تحليلًا لبيانات السوق أو ضمانًا للمبيعات.`;
+}
+function renderCampaignResult(product) {
+  $('#campaign-result').innerHTML=`<div class="result-card"><div class="result-head"><div><span class="section-kicker">اقتراح جاهز للتعديل</span><h2>خطة ${esc(product.name)}</h2></div><span class="result-spark">✦</span></div><textarea id="campaign-text" rows="23" aria-label="خطة التسويق المقترحة">${esc(campaignText(product))}</textarea><div class="result-actions"><button class="button button-primary" data-act="copy-campaign">نسخ الخطة</button><button class="button button-outline" data-act="save-campaign" ${data.user?.role==='seller'?'':'disabled'}>حفظها في تجاربك</button></div><p class="fine-print">الخطة نص إرشادي تجريبي؛ راجع البيانات والادعاءات والأسعار قبل النشر.</p></div>`;
+}
+function databasePage() {
+  const rows=[['حسابات التجربة','دور عشوائي، اسم وبريد وكلمة مرور وهمية'],['المنتجات','التفاصيل والصور وبيانات المخزون'],['السلة والطلبات','الكمية والعنوان ومراحل الطلب'],['خطة التسويق','النص الذي أنشأه المستخدم']];
+  return `<main class="page-wrap database-page"><div class="section-heading"><span class="section-kicker">شفافية قبل كل شيء</span><h1>مخطط البيانات</h1><p>هذه الصفحة تعرض شكل البيانات التي تحاكيها التجربة؛ لا توجد قاعدة بيانات متصلة.</p></div><div class="local-storage-banner"><span>▣</span><div><b>لا يوجد خادم أو قاعدة بيانات فعلية</b><small>تُحفظ بيانات العرض داخل تخزين المتصفح (localStorage) على هذا الجهاز فقط. لا تُرسل معلوماتك لأي مكان. التخزين غير مشفّر؛ لا تدخل بيانات أو كلمات مرور حقيقية.</small></div><strong>محلي</strong></div><div class="data-entity-grid">${rows.map(([name,description],i)=>`<article class="data-entity"><span class="entity-number">0${i+1}</span><h2>${name}</h2><p>${description}</p><small>محلي فقط</small></article>`).join('')}</div><div class="data-flow"><span>المستخدم</span><i>→</i><span>المنتجات</span><i>→</i><span>السلة</span><i>→</i><span>طلب تجريبي</span></div><div class="closing-note"><span>✳</span><p><b>إعادة ضبط التجربة:</b> يمكنك حذف بيانات هذا النموذج المحلي من الزر أدناه. لن يؤثر ذلك على أي نظام خارجي. التخزين المحلي غير مشفّر، فتجنّب المعلومات الحساسة.</p></div><button class="button button-outline" data-act="reset-demo">مسح بيانات التجربة من هذا الجهاز</button></main>`;
+}
+function campaignPage() {
+  const own=data.user?.role==='seller'?data.products.filter((p)=>p.sellerId===data.user.id):[];
+  return `<main class="page-wrap campaign-page"><section class="campaign-hero"><div><span class="eyebrow"><i></i> استوديو نمو المتجر</span><h1>سوّق بذكاء.<br><em>خطوة بخطوة.</em></h1><p>حوّل معلومات منتجك إلى خطة محتوى قابلة للتنفيذ. عدّل الاقتراحات قبل استخدامها.</p></div><div class="campaign-badge"><span>✦</span><b>خطة عملية<br>بـ 30 يومًا</b></div></section><div class="campaign-layout"><form id="campaign-form" class="form-card campaign-form"><div class="form-section-heading"><span>✦</span><div><h2>من أين نبدأ؟</h2><p>أدخل تفاصيل منتجك للحصول على اقتراحات مناسبة.</p></div></div>${own.length?`<label>اختر من منتجات متجرك<select name="productId"><option value="">اختيار منتج…</option>${own.map((p)=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>`:''}<label>اسم المنتج<input name="name" placeholder="مثال: حقيبة يومية" required></label><label>الفئة<input name="category" placeholder="مثال: أزياء" required></label><div class="form-grid campaign-inputs"><label>السعر بالجنيه<input type="number" name="price" min="0" placeholder="اختياري"></label><label>العلامة التجارية<input name="brand" placeholder="اختياري"></label></div><label>ما الفائدة الأساسية للعميل؟<textarea name="description" rows="3" placeholder="اكتب فائدة أو ميزة مؤكدة"></textarea></label><button class="button button-primary button-full">أنشئ خطة التسويق <span>✦</span></button><p class="fine-print">مولّد اقتراحات محلي تجريبي — لا يتصل بخدمة ذكاء اصطناعي خارجية ولا يضمن نتائج البيع.</p></form><section id="campaign-result" class="campaign-result"><div class="result-placeholder"><span>✦</span><h2>خطتك تبدأ من هنا</h2><p>أكمل بيانات منتجك واضغط «أنشئ خطة التسويق» لتظهر خطة المحتوى والخطوات المقترحة.</p><div><i>01 تحديد الجمهور</i><i>02 كتابة المحتوى</i><i>03 متابعة النتائج</i></div></div></section></div></main>`;
+}
+const views={store:storePage,login:demoLogin,cart:cartPage,orders:ordersPage,profile:profilePage,database:databasePage,favorites:()=>`<main class="page-wrap"><div class="section-heading"><h1>مفضلتي</h1><p>المنتجات التي حفظتها أثناء هذه التجربة.</p></div>${productList(data.products.filter((p)=>data.favorites.includes(p.id)))}</main>`,marketing:campaignPage,seller:sellerDashboard,newproduct:productForm};
+function render() {
+  nav(); let [page,arg]=(location.hash||'').slice(1).split('/');
+  if(!page) page=mode==='seller'?'seller':mode==='marketing'?'marketing':'store';
+  const allowed=mode==='seller'?['seller','newproduct','orders','profile']:mode==='marketing'?['marketing']:['store','product','login','cart','orders','profile','database','favorites'];
+  if(!allowed.includes(page)) page=mode==='seller'?'seller':mode==='marketing'?'marketing':'store';
+  $('#app').innerHTML=page==='product'?productPage(decodeURIComponent(arg||'')):views[page]();
+  if($('#product-form')) updateCompletion($('#product-form'));
+}
+function setPage(page,target=STORE) { location.href=`${target}#${page}`; }
+function addToCart(id) {
+  const product=data.products.find((p)=>p.id===id); if(!product)return;
+  const current=data.cart[id]?.qty||0, stock=Number(product.stock)||0;
+  if(stock<1){toast('نفدت الكمية في هذه التجربة.',true);return;}
+  if(current>=stock){toast(`المتاح ${count(stock)} قطعة فقط.`,true);return;}
+  data.cart[id]={qty:current+1,price:Number(product.discountPrice)>0&&Number(product.discountPrice)<Number(product.price)?Number(product.discountPrice):Number(product.price)};
+  persist(); nav(); toast('أُضيف المنتج إلى سلتك التجريبية.');
+}
+function productValues(form) {
+  const fd=new FormData(form), out={};
+  for(const [key,value] of fd.entries()) if(typeof value==='string') out[key]=cleanText(value);
+  out.price=Number(out.price||0);out.discountPrice=Number(out.discountPrice||0);out.stock=Number(out.stock||0);
+  out.keywords=(out.keywords||'').split(/[،,]/).map(cleanText).filter(Boolean);out.status=fd.has('publish')?'published':'draft';return out;
+}
+window.addEventListener('hashchange',render);
+document.addEventListener('click',async(event)=>{
+  const button=event.target.closest('[data-act]');if(!button)return;
+  const {act,id}=button.dataset;
+  if(act==='start-demo'){startDemo(button.dataset.role||'buyer');return;}
+  if(act==='logout'){logout();return;}
+  if(act==='menu'){$('#nav-links')?.classList.toggle('nav-open');return;}
+  if(act==='category'){categoryFilter=id||'';render();$('#catalog')?.scrollIntoView({behavior:'smooth'});return;}
+  if(act==='add'){addToCart(id);return;}
+  if(act==='quantity'){const next=(data.cart[id]?.qty||0)+Number(button.dataset.delta),product=data.products.find((p)=>p.id===id);if(next<1)delete data.cart[id];else if(product&&next>Number(product.stock)){toast(`المتاح ${count(product.stock)} قطعة فقط.`,true);return;}else data.cart[id].qty=next;persist();render();return;}
+  if(act==='remove-cart'){delete data.cart[id];persist();render();return;}
+  if(act==='favorite'){data.favorites=data.favorites.includes(id)?data.favorites.filter((x)=>x!==id):[...data.favorites,id];persist();render();return;}
+  if(act==='new-product'){data.editingId='';persist();setPage('newproduct','/seller.html');return;}
+  if(act==='edit-product'){data.editingId=id;persist();setPage('newproduct','/seller.html');return;}
+  if(act==='delete-product'){data.products=data.products.filter((p)=>p.id!==id);persist();render();toast('تم حذف المنتج من بيانات التجربة.');return;}
+  if(act==='suggest-product'){if($('#product-form'))suggestMissing($('#product-form'));return;}
+  if(act==='polish-product'){if($('#product-form'))polishForm($('#product-form'));return;}
+  if(act==='preview-product'){
+    const form=$('#product-form');if(!form)return;const p={...productValues(form),id:'preview',images:selectedFiles.length?[selectedFiles[0]]:data.products.find((entry)=>entry.id===data.editingId)?.images||[]};
+    $('#product-preview').innerHTML=`<div class="preview-area"><span class="section-kicker">معاينة البطاقة</span>${productCard(p)}</div>`;return;
   }
-  const search = MODE === 'store' ? `<form id="sf" class="search"><input name="q" placeholder="ابحث عن منتج أو علامة تجارية…" value="${esc(f.q)}"><button>🔍</button></form>` : '<span style="flex:1"></span>';
-  $('#nav').innerHTML = `<div class="top"><a class="logo" href="/app.html" ${MODE === 'store' ? 'data-act="home"' : ''}>🛍 المتجر<b>الذكي</b></a>${search}
-    <a class="cta sm" href="/app.html#er">🗄 قاعدة البيانات</a><a href="/app.html#${me ? 'profile' : 'login'}">👤 ${me ? esc(me.name) : 'تسجيل الدخول'}</a>${me ? '<a href="/app.html#orders">🧾 طلباتي</a>' : ''}<a href="/app.html#cart">🛒 السلة <span class="badge">${n}</span></a></div>
-    <div class="strip"><a href="/">📚 الرئيسية — قواعد البيانات</a><a href="/app.html" ${MODE === 'store' ? 'data-act="home"' : ''}>🛍 المتجر</a><a href="/marketing.html">📣 التسويق</a>${isBuyer() ? '<a href="/app.html#favorites">❤️ المفضلة</a>' : ''}${me ? '<a href="/app.html#notifications">🔔 الإشعارات</a>' : ''}
-    <a href="/seller.html">🏪 ${role === 'seller' || role === 'admin' ? 'لوحة البائع' : 'بيع على المتجر'}</a>${me ? '<button data-act="logout">خروج</button>' : ''}</div>`;
-}
-
-const pic = (u) => (u ? `<img src="${esc(u)}" alt="" loading="lazy">` : '<div class="ph">🛍</div>');
-const stars = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
-const card = (p) => {
-  catalog[p.id] = p;
-  const pct = p.discountPrice ? Math.round((1 - p.discountPrice / p.price) * 100) : 0;
-  return `<div class="card"><a href="#product/${p.id}" class="pic">${pct ? `<span class="off">-${pct}٪</span>` : ''}${pic(p.images?.[0])}</a><a href="#product/${p.id}" class="nm">${esc(p.name)}</a>
-  ${p.ratingCount ? `<div class="rt">${stars(Math.round(p.ratingAvg))} <small>(${p.ratingCount})</small></div>` : '<div class="rt">&nbsp;</div>'}
-  <div class="pr"><b>${money(p.discountPrice || p.price)}</b>${pct ? ` <span class="old">${money(p.price)}</span>` : ''}</div>
-  <button class="cta" data-act="add" data-id="${p.id}" ${p.stock < 1 ? 'disabled' : ''}>${p.stock < 1 ? 'نفدت الكمية' : 'أضف إلى السلة'}</button>
-  ${isBuyer() ? `<button class="ghost" data-act="fav" data-id="${p.id}">${favIds.has(p.id) ? '❤️ في المفضلة' : '🤍 أضف للمفضلة'}</button>` : ''}</div>`;
-};
-const grid = (l) => `<div class="grid">${l.map(card).join('') || '<p class="muted">لا توجد منتجات.</p>'}</div>`;
-const sec = (title, l) => (l.length ? `<div class="sec"><h2>${title}</h2>${grid(l)}</div>` : '');
-
-function makePlan(p) {
-  const price = +p.price || 0, cat = p.category || 'المنتج', name = p.name || 'المنتج';
-  const lo = Math.round(price * 0.95), hi = Math.round(price * 1.1), kw = [name, cat, p.brand, 'شراء ' + cat, 'أفضل ' + name, 'عروض ' + cat].filter(Boolean);
-  const rows = [
-    ['1. نوع المنتج', `${cat}${p.brand ? ' — ' + p.brand : ''}`],
-    ['2. الجمهور المستهدف', r([`المهتمون بـ${cat} والمتسوقون عبر الهاتف`, `الأسر والشباب الباحثون عن ${cat} بسعر مناسب`])],
-    ['3. الفئة العمرية', r(['18–24 سنة', '25–34 سنة', '25–44 سنة'])],
-    ['4. احتياجات العملاء', r(['جودة واضحة بسعر عادل', 'توصيل سريع وضمان استبدال', 'ثقة عبر تقييمات وصور حقيقية'])],
-    ['5. تحليل المنافسين', `قارن منتجك بـ 3–5 منتجات مشابهة في تصنيف ${cat} داخل المتجر (السعر، الصور، التقييمات) وحدد ميزة واحدة تتفوق بها. (هذا إرشاد عام لا تحليل بيانات حقيقي.)`],
-    ['6. سعر البيع المقترح (تقديري)', price ? `بين ${lo} و ${hi} ج.م` : 'أدخل السعر أولًا'],
-    ['7. اسم تجاري مقترح', r([`${name} بلس`, `${name} برو`, `لمسة ${cat}`])],
-    ['8. العنوان التسويقي', r([`${name}: الجودة التي تستحقها`, `اكتشف ${name} الآن بسعر مميز`])],
-    ['9. وصف احترافي', `${name} من فئة ${cat}${p.brand ? ' من ' + p.brand : ''}. ${p.description || 'صُمم ليلبي احتياجك اليومي بجودة موثوقة.'} متوفر الآن مع إمكانية الاستبدال حسب السياسة.`],
-    ['10. كلمات SEO', kw.join('، ')],
-    ['11. الصور المقترحة', 'صورة رئيسية بخلفية بيضاء، صورة أثناء الاستخدام، صورة تفاصيل مقربة، صورة بالأبعاد/المقارنة.'],
-    ['12. أفكار فيديو', r(['فيديو 15 ثانية: فتح العلبة + أهم 3 مميزات', 'قبل/بعد الاستخدام مع نص قصير', 'مراجعة سريعة بصوت البائع']) ],
-    ['13. منشورات سوشيال', `1) وصل ${name} 🎉 اطلبه الآن.\n2) لماذا يختار عملاؤنا ${name}؟ 3 أسباب في منشور.\n3) عرض لفترة محدودة على ${name}!`],
-    ['14. حملات إعلانية', 'حملة وعي (فيديو قصير) ثم حملة إعادة استهداف لمن شاهد المنتج. ابدأ بميزانية صغيرة وقِس النتائج.'],
-    ['15. منصات التسويق', r(['فيسبوك + إنستغرام + تيك توك', 'إنستغرام + واتساب + جوجل', 'تيك توك + فيسبوك'])],
-    ['16. العروض والخصومات', r(['خصم 10٪ للطلب الأول', 'كوبون لفترة محدودة', 'شحن مخفض عند شراء قطعتين'])],
-    ['17. خطة 30 يومًا', 'الأسبوع 1: تحسين الصور والوصف والـSEO.\nالأسبوع 2: منشورات + فيديو قصير + عرض افتتاحي.\nالأسبوع 3: إعلان مدفوع صغير + جمع تقييمات.\nالأسبوع 4: قياس النتائج وتكرار الأفضل.'],
-    ['18. متابعة الأداء', 'تابع المشاهدات والمبيعات لكل منتج من لوحة البائع، وقارن أسبوعيًا بين المنتجات.'],
-  ];
-  return rows.map(([a, b]) => `${a}\n${b}`).join('\n\n') + '\n\n⚠️ هذه اقتراحات تقديرية وإرشادية وليست ضمانًا للمبيعات.';
-}
-
-const ERT = { Users: ['id PK', 'name', 'role', 'phone', 'addresses[] (Addresses)'], Sellers: ['userId PK→Users', 'storeName'], Products: ['id PK', 'sellerId FK→Users', 'category FK→Categories', 'price', 'stock', 'status', 'images[] (ProductImages)'],
-  Categories: ['id PK', 'name'], Orders: ['id PK', 'buyerId FK→Users', 'total', 'status', 'couponCode FK→Coupons', 'items[] (OrderItems)'], OrderItems: ['orderId FK', 'productId FK→Products', 'qty', 'price'],
-  Reviews: ['id PK', 'productId FK', 'buyerId FK', 'rating'], MarketingPlans: ['id PK', 'sellerId FK', 'plan'], Coupons: ['code PK', 'percent', 'active'], Payments: ['id PK', 'orderId FK', 'method', 'status'],
-  Notifications: ['id PK', 'uid FK→Users', 'text', 'read'], Favorites: ['uid FK', 'productId FK'], Cart: ['(في المتصفح) productId', 'qty'] };
-
-const views = {
-  async store() {
-    const qs = new URLSearchParams({ q: f.q, category: f.category });
-    const [pr, sr, cr] = await Promise.allSettled([api('/products?' + qs), api('/stats'), api('/categories')]);
-    if (pr.status === 'rejected') throw pr.reason;
-    const list = pr.value, st = sr.value || { products: list.length, users: 0, orders: 0 }, cats = cr.value || [];
-    if (isBuyer()) favIds = new Set((await api('/favorites')).map((p) => p.id));
-    const t = (p) => p.createdAt?.seconds || 0, byNew = [...list].sort((a, b) => t(b) - t(a)), byTop = [...list].sort((a, b) => (b.sales || 0) - (a.sales || 0));
-    const chips = `<div class="chips"><button data-act="cat" data-id="" class="${!f.category ? 'on' : ''}">الكل</button>${cats.map((c) => `<button data-act="cat" data-id="${esc(c.name)}" class="${f.category === c.name ? 'on' : ''}">${esc(c.name)}</button>`).join('')}</div>`;
-    const tiles = cats.length ? `<div class="sec"><h2>تسوّق حسب القسم</h2><div class="tiles">${cats.map((x) => `<button data-act="cat" data-id="${esc(x.name)}"><span>${esc(x.icon || '🏷')}</span>${esc(x.name)}</button>`).join('')}</div></div>` : '';
-    if (f.q || f.category) {
-      const sorted = f.sort === 'top' ? byTop : f.sort === 'sale' ? list.filter((p) => p.discountPrice) : byNew;
-      return `${chips}<div class="tabs">${[['new', 'الأحدث'], ['top', 'الأكثر مبيعًا'], ['sale', 'المخفضة']].map(([k, l]) => `<button data-act="sort" data-id="${k}" class="${f.sort === k ? 'on' : ''}">${l}</button>`).join('')}</div><h3>${list.length} نتيجة ${f.q ? `لـ «${esc(f.q)}»` : ''}</h3>${grid(sorted)}`;
-    }
-    return `<div class="hero"><div><h1>تسوّق بذكاء من بائعين موثوقين</h1><p>اكتشف أحدث المنتجات والعروض، واشترِ بخطوات بسيطة.</p><a class="cta" href="#store" data-act="cat" data-id="">تسوّق الآن</a></div>
-      <div class="stats"><div><b>${st.products}</b>منتج</div><div><b>${st.users}</b>مستخدم</div><div><b>${st.orders}</b>طلب</div></div></div>${tiles}
-      ${sec('🔥 عروض وخصومات', byNew.filter((p) => p.discountPrice).slice(0, 5))}${sec('⭐ الأكثر مبيعًا', byTop.filter((p) => p.sales).slice(0, 5))}${sec('🆕 وصل حديثًا', byNew.slice(0, 10))}${list.length ? '' : '<div class="box"><b>لا توجد منتجات منشورة بعد.</b><br>سجّل كبائع من بوابة البائعين وانشر أول منتج.</div>'}
-      <div class="trust"><div>🚚 توصيل لجميع المحافظات</div><div>🔒 دفع تجريبي آمن</div><div>↩️ سياسة استبدال واسترجاع</div><div>⭐ تقييمات حقيقية من مشترين</div></div>`;
-  },
-  async product(id) {
-    const { product: p, reviews, related } = await api('/products/' + id);
-    catalog[p.id] = p;
-    if (isBuyer()) favIds = new Set((await api('/favorites')).map((x) => x.id));
-    const avg = reviews.length ? reviews.reduce((s, x) => s + x.rating, 0) / reviews.length : 0, imgs = (p.images || []).filter(Boolean), pct = p.discountPrice ? Math.round((1 - p.discountPrice / p.price) * 100) : 0;
-    return `<div class="muted"><a href="#store">الرئيسية</a> › ${esc(p.category)}</div>
-      <div class="box pd"><div>${imgs[0] ? `<img id="bigimg" src="${esc(imgs[0])}" alt="">` : '<div class="ph big">🛍</div>'}<div class="thumbs">${imgs.map((u) => `<img src="${esc(u)}" data-act="img" data-id="${esc(u)}" alt="">`).join('')}</div></div>
-      <div><h2>${esc(p.name)}</h2><div class="rt">${stars(Math.round(avg))} <small>${avg ? avg.toFixed(1) : ''} (${reviews.length} تقييم)</small></div><div class="muted">${p.brand ? 'العلامة التجارية: ' + esc(p.brand) : ''}</div><hr>
-      <div class="pr big">${pct ? `<span class="off st">-${pct}٪</span> ` : ''}<b>${money(p.discountPrice || p.price)}</b>${pct ? ` <span class="old">${money(p.price)}</span>` : ''}</div>
-      <div class="${p.stock > 0 ? 'ok' : 'err'}">${p.stock > 0 ? (p.stock < 5 ? `متبقي ${p.stock} فقط` : 'متوفر') : 'نفدت الكمية'}</div>
-      <p>${esc(p.description)}</p><pre>${esc(p.specs)}</pre><div class="muted">الوزن: ${esc(p.weight) || '—'} | الأبعاد: ${esc(p.dimensions) || '—'} | المنشأ: ${esc(p.origin) || '—'}</div><div class="muted">الاسترجاع: ${esc(p.returnPolicy) || '—'}</div>
-      <div class="acts"><button class="cta" data-act="add" data-id="${p.id}" ${p.stock < 1 ? 'disabled' : ''}>أضف إلى السلة</button><button class="buy" data-act="buy" data-id="${p.id}" ${p.stock < 1 ? 'disabled' : ''}>اشتر الآن</button>
-      ${isBuyer() ? `<button class="ghost" data-act="fav" data-id="${p.id}">${favIds.has(p.id) ? '❤️ في المفضلة' : '🤍 مفضلة'}</button>` : ''}</div></div></div>
-      <div class="box"><h3>تقييمات العملاء</h3>${reviews.map((x) => `<div><b>${esc(x.buyerName)}</b> <span class="rt">${stars(x.rating)}</span><div>${esc(x.comment)}</div><hr></div>`).join('') || '<p class="muted">لا تقييمات بعد.</p>'}
-      ${isBuyer() ? `<form id="rvf" data-id="${p.id}"><select name="rating">${[5, 4, 3, 2, 1].map((n) => `<option value="${n}">${stars(n)}</option>`).join('')}</select><textarea name="comment" placeholder="رأيك في المنتج (للمشترين فقط)"></textarea><button class="p">إرسال التقييم</button></form>` : ''}</div>
-      ${related.length ? `<div class="sec"><h2>منتجات مقترحة</h2>${grid(related)}</div>` : ''}`;
-  },
-  async favorites() { return isBuyer() ? grid(await api('/favorites').then((l) => { favIds = new Set(l.map((p) => p.id)); return l; })) : views.login(); },
-  login() {
-    const S = MODE === 'seller';
-    return `<div class="auth"><div class="box"><h2>${S ? 'بوابة البائعين — تسجيل الدخول' : 'تسجيل الدخول'}</h2><form id="lf"><input name="email" type="email" placeholder="البريد الإلكتروني" required><input name="password" type="password" minlength="6" placeholder="كلمة المرور" required><button class="p">دخول</button></form></div>
-      <div class="box"><h2>${S ? 'افتح متجرك وابدأ البيع' : 'إنشاء حساب مشتري'}</h2><form id="rf"><input name="name" placeholder="الاسم" required><input name="phone" placeholder="رقم الهاتف"><input name="email" type="email" placeholder="البريد الإلكتروني" required>
-      <input name="password" type="password" minlength="6" placeholder="كلمة المرور (6 أحرف على الأقل)" required><input type="hidden" name="role" value="${S ? 'seller' : 'buyer'}">${S ? '<input name="storeName" placeholder="اسم المتجر" required>' : '<input type="hidden" name="storeName">'}<button class="p">إنشاء الحساب</button></form></div></div>`;
-  },
-  cart() {
-    const items = Object.entries(cart);
-    if (!items.length) return '<p class="muted">السلة فارغة.</p>';
-    const total = items.reduce((s, [, i]) => s + i.price * i.qty, 0), saved = items.reduce((s, [, i]) => s + (i.list - i.price) * i.qty, 0);
-    const rows = items.map(([id, i]) => `<div class="box"><b>${esc(i.name)}</b> — ${money(i.price)} × ${i.qty}<button class="d" data-act="dec" data-id="${id}">−</button><button class="p" data-act="inc" data-id="${id}">+</button><button class="d" data-act="rm" data-id="${id}">حذف</button></div>`).join('');
-    const form = isBuyer() ? `<form id="cf" class="box"><h3>إتمام الشراء</h3><input name="name" placeholder="الاسم" value="${esc(me.name)}" required><input name="phone" placeholder="الهاتف" value="${esc(me.phone)}" required>
-      <select name="saved"><option value="">— عنوان جديد —</option>${(me.addresses || []).map((a) => `<option>${esc(a.line)}</option>`).join('')}</select><textarea name="line" placeholder="عنوان التوصيل"></textarea>
-      <input name="couponCode" placeholder="كوبون خصم (اختياري)"><select name="pay"><option value="cod">الدفع عند الاستلام (تجريبي)</option><option value="card_sim">محاكاة الدفع بالبطاقة (دون خصم)</option></select><button class="p">تأكيد الشراء</button></form>` : '<p>سجّل الدخول بحساب مشتري لإتمام الشراء.</p>';
-    return `${rows}<div class="box"><b>الإجمالي: ${money(total)}</b> — وفّرت ${money(saved)} <div class="muted">يُعاد حساب السعر والكوبون من الخادم عند التأكيد.</div></div>${form}`;
-  },
-  async orders() {
-    if (!me) return views.login();
-    const list = await api('/orders'), staff = me.role !== 'buyer';
-    return list.map((o) => `<div class="box"><b>${esc(o.orderNumber)}</b> <span class="tag">${ST[o.status]}</span> — ${money(o.total)}${o.couponCode ? ` (كوبون ${esc(o.couponCode)})` : ''} — ${o.paymentMethod === 'cod' ? 'عند الاستلام' : 'بطاقة تجريبية'}
-      <div class="muted">${esc(o.buyerName)} — ${esc(o.address?.line)}</div>${o.items.map((i) => `<div>${esc(i.name)} × ${i.qty} — ${money(i.price)}</div>`).join('')}
-      ${staff ? `<select data-act="status" data-id="${o.id}">${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${k === o.status ? 'selected' : ''}>${v}</option>`).join('')}</select>` : o.status === 'new' ? `<button class="d" data-act="cancelo" data-id="${o.id}">إلغاء الطلب</button>` : ''}</div>`).join('') || '<p class="muted">لا توجد طلبات.</p>';
-  },
-  async notifications() {
-    if (!me) return views.login();
-    const l = await api('/notifications'); api('/notifications/read', { method: 'POST' }).catch(() => {});
-    return `<h3>الإشعارات</h3>` + (l.map((n) => `<div class="box">${n.read ? '' : '🔵 '}${esc(n.text)}</div>`).join('') || '<p class="muted">لا إشعارات.</p>');
-  },
-  async profile() {
-    if (!me) return views.login();
-    return `<form id="prf" class="box"><h3>حسابي (${me.role === 'buyer' ? 'مشتري' : me.role === 'seller' ? 'بائع' : 'مدير'})</h3><input name="name" value="${esc(me.name)}" required><input name="phone" value="${esc(me.phone)}" placeholder="الهاتف">
-      ${me.role === 'seller' ? '<input name="storeName" placeholder="اسم المتجر (تعديل بيانات المتجر)">' : ''}<textarea name="addresses" placeholder="العناوين، عنوان في كل سطر">${esc((me.addresses || []).map((a) => a.line).join('\n'))}</textarea><button class="p">حفظ</button></form>`;
-  },
-  async seller() {
-    if (!['seller', 'admin'].includes(me?.role)) return '<div class="box">هذه الصفحة للبائعين فقط. <a href="/app.html"><u>العودة إلى المتجر</u></a></div>';
-    const [list, orders] = await Promise.all([api('/my-products'), api('/orders')]);
-    mine = Object.fromEntries(list.map((p) => [p.id, p]));
-    const sum = (k) => list.reduce((s, p) => s + (p[k] || 0), 0), kp = ([l, v, i]) => `<div class="kpi"><span>${i}</span><div><small>${l}</small><b>${v}</b></div></div>`;
-    return `<h2>${me.role === 'admin' ? 'كل المنتجات' : 'منتجاتي'}</h2><div class="kpis">${[['المنتجات', list.length, '📦'], ['المنشورة', list.filter((p) => p.status === 'published').length, '✅'], ['المشاهدات', sum('views'), '👁'], ['المبيعات', sum('sales'), '💰'], ['الطلبات', orders.length, '🧾']].map(kp).join('')}</div>
-      ${me.role === 'seller' ? '<a class="cta" href="#newproduct">➕ إضافة منتج جديد</a><br><br>' : ''}` + (list.map((p) => `<div class="prow">${pic(p.images?.[0])}<div style="flex:1"><b>${esc(p.name)}</b> <span class="tag">${PST[p.status]}</span><div class="muted">${money(p.discountPrice || p.price)} — مخزون ${p.stock} — مشاهدات ${p.views || 0} — مبيعات ${p.sales || 0}</div></div>
-      ${me.role === 'seller' ? `<button class="p" data-act="editp" data-id="${p.id}">تعديل</button>` : ''}<button class="d" data-act="delp" data-id="${p.id}">حذف</button>${me.role === 'admin' && p.status === 'pending' ? `<button class="p" data-act="ok" data-id="${p.id}">قبول</button><button class="d" data-act="no" data-id="${p.id}">رفض</button>` : ''}</div>`).join('') || '<p class="muted">لا توجد منتجات بعد.</p>');
-  },
-  async newproduct() {
-    if (!me || !['seller', 'admin'].includes(me.role)) return '<p class="err">هذه الصفحة للبائعين والمدير فقط.</p>';
-    const [list, cats] = await Promise.all([api('/my-products'), api('/categories')]);
-    mine = Object.fromEntries(list.map((p) => [p.id, p]));
-    const ed = editing, v = (k) => esc(ed?.[k] ?? ''), inp = (k, l, t = 'text', req) => `<input name="${k}" type="${t}" step="any" placeholder="${l}" value="${v(k)}" ${req ? 'required' : ''}>`;
-    const form = me.role === 'seller' ? `<form id="pf" class="box"><h3>${ed ? 'تعديل منتج' : 'إضافة منتج'}</h3>${inp('name', 'اسم المنتج', 'text', 1)}${inp('price', 'السعر الأساسي', 'number', 1)}${inp('discountPrice', 'السعر بعد الخصم', 'number')}${inp('stock', 'الكمية المتاحة', 'number', 1)}
-      <input name="category" list="cats" placeholder="التصنيف" value="${v('category')}" required><datalist id="cats">${cats.map((c) => `<option value="${esc(c.name)}">`).join('')}</datalist>${inp('brand', 'العلامة التجارية')}${inp('weight', 'الوزن')}${inp('dimensions', 'الأبعاد')}${inp('origin', 'بلد المنشأ')}${inp('keywords', 'الكلمات المفتاحية (بفواصل)')}${inp('returnPolicy', 'سياسة الاستبدال والاسترجاع')}
-      <textarea name="description" placeholder="وصف المنتج">${v('description')}</textarea><textarea name="specs" placeholder="المواصفات">${v('specs')}</textarea><label>الصورة الرئيسية + صور إضافية (حتى 4)</label><input name="image" type="file" accept="image/*" multiple>
-      <div id="meter"></div><label><input type="checkbox" name="publish" style="width:auto"> نشر (وإلا يُحفظ كمسودة)</label><br><button class="p">${ed ? 'حفظ التعديلات' : 'حفظ'}</button> <button type="button" class="p" data-act="preview">معاينة</button>${ed ? ' <button type="button" class="d" data-act="canceledit">إلغاء التعديل</button>' : ''}<div id="prev"></div></form>` : '';
-    return form || '<div class="box">هذه الصفحة للبائعين فقط.</div>';
-  },
-  async marketing() {
-    const S = me?.role === 'seller';
-    if (S) mine = Object.fromEntries((await api('/my-products')).map((p) => [p.id, p]));
-    const intro = MODE === 'marketing' ? `<div class="hero"><div><h1>📣 التسويق الرقمي للمنتجات</h1><p>جهّز خطة تسويق كاملة لمنتجك في ثوانٍ، ثم انشره في المتجر.</p><a class="cta" href="/seller.html">🏪 ابدأ البيع الآن</a></div></div>
-      <div class="trust"><div>🎯 تحديد الجمهور والفئة العمرية</div><div>🔎 كلمات SEO وعناوين جذابة</div><div>📱 منشورات وفيديوهات ومنصات</div><div>📅 خطة 30 يومًا ومتابعة الأداء</div></div>` : '';
-    return intro + `<form id="mf" class="box"><h3>مساعد التسويق</h3>${S ? `<select name="pick" data-act="pickp"><option value="">— اختر منتجًا أو أدخل البيانات يدويًا —</option>${Object.values(mine).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
-      <input name="name" placeholder="اسم المنتج" required><input name="category" placeholder="التصنيف" required><input name="price" type="number" placeholder="السعر"><input name="brand" placeholder="العلامة التجارية"><textarea name="description" placeholder="وصف مختصر"></textarea><button class="p">إنشاء خطة تسويقية</button></form>
-      <div id="planbox"></div><p class="muted">الاقتراحات تُولَّد بقوالب إرشادية داخل الموقع وليست ضمانًا للمبيعات. ${S ? '' : 'سجّل كبائع (من بوابة البائعين) لحفظ خططك.'}</p>`;
-  },
-  async admin() {
-    if (me?.role !== 'admin') return '<p class="err">للمدير فقط.</p>';
-    const [s, users, cats, coupons, reviews] = await Promise.all([api('/admin/stats'), api('/admin/users'), api('/categories'), api('/coupons'), api('/admin/reviews')]);
-    const sc = ([l, x]) => `<div class="card"><span class="muted">${l}</span><b style="font-size:1.4em">${x}</b></div>`;
-    const bars = (a, k) => { const m = Math.max(1, ...a.map((x) => x[k])); return a.map((x) => `<div>${esc(x.name)}<div class="bar2" style="width:${(x[k] / m) * 100}%">${x[k]}</div></div>`).join('') || '<p class="muted">لا بيانات</p>'; };
-    return `<div class="grid">${[['المستخدمون', s.users], ['البائعون', s.sellers], ['المشترون', s.buyers], ['المنتجات', s.products], ['المنشورة', s.published], ['قيد المراجعة', s.pending], ['الطلبات', s.orders], ['المبيعات التجريبية', money(s.sales)], ['الملغاة', s.cancelled]].map(sc).join('')}</div>
-      <div class="box"><button class="p" data-act="seed">📦 تحميل منتجات وأقسام تجريبية</button> <span class="muted">بيانات عرض واقعية؛ آمن إعادة الضغط.</span></div><div class="box"><h3>الأكثر مشاهدة</h3>${bars(s.topViewed, 'views')}<h3>الأكثر طلبًا</h3>${bars(s.topSold, 'sales')}</div>
-      <div class="box"><h3>التصنيفات</h3><form id="catf" class="bar"><input name="icon" placeholder="إيموجي" style="max-width:90px"><input name="name" placeholder="تصنيف جديد" required><button class="p">إضافة</button></form>${cats.map((c) => `<span class="tag">${esc(c.icon || '')} ${esc(c.name)} <a href="#" data-act="delcat" data-id="${c.id}">✕</a></span> `).join('')}</div>
-      <div class="box"><h3>الكوبونات</h3><form id="cpf" class="bar"><input name="code" placeholder="CODE10" required><input name="percent" type="number" placeholder="نسبة الخصم" required><button class="p">إضافة</button></form>${coupons.map((c) => `<span class="tag">${esc(c.id)} ${c.percent}٪ <a href="#" data-act="delcp" data-id="${c.id}">✕</a></span> `).join('')}</div>
-      <div class="box"><h3>المستخدمون</h3>${users.map((u) => `<div>${esc(u.name)} — ${esc(u.role)} ${u.blocked ? '<span class="tag">موقوف</span>' : ''} ${u.role !== 'admin' ? `<button class="d" data-act="block" data-id="${u.id}" data-b="${!u.blocked}">${u.blocked ? 'تفعيل' : 'إيقاف'}</button>` : ''}</div>`).join('')}</div>
-      <div class="box"><h3>التقييمات</h3>${reviews.map((x) => `<div>${stars(x.rating)} ${esc(x.comment)} — ${esc(x.buyerName)} <button class="d" data-act="delrv" data-id="${x.id}">حذف</button></div>`).join('') || '<p class="muted">لا تقييمات</p>'}</div>`;
-  },
-  er() {
-    return `<div class="box"><h2>مخطط قاعدة البيانات (ER)</h2><p class="muted">التنفيذ الفعلي على Cloud Firestore (NoSQL): المجموعات تقابل الجداول، والعلاقات تُمثّل بمعرّفات (FK). Addresses وProductImages وOrderItems مضمّنة داخل مستنداتها، وCart محفوظة في المتصفح كحالة واجهة.</p>
-      <div class="grid">${Object.entries(ERT).map(([t, c]) => `<div class="er"><h4>${t}</h4>${c.map((x) => `<div>${esc(x)}</div>`).join('')}</div>`).join('')}</div>
-      <p>العلاقات: Users 1─∞ Orders · Orders 1─∞ OrderItems ─∞ Products · Users(seller) 1─∞ Products · Categories 1─∞ Products · Products 1─∞ Reviews · Orders 1─1 Payments · Users 1─∞ Notifications · Users ∞─∞ Products (Favorites).</p></div>`;
-  },
-};
-
-async function render() {
-  nav();
-  if (!authReady) return;
-  let [v, arg] = (location.hash || '').slice(1).split('/');
-  if (!v || !ALLOW[MODE].includes(v)) v = dflt();
-  if (MODE === 'seller' && !me) v = 'login';
-  const el = $('#app'); el.innerHTML = '<p class="muted">جاري التحميل…</p>';
-  try { el.innerHTML = await (views[v] || views.store)(arg); } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p><p class="muted">لتشخيص السبب افتح <a href="/api/diag"><u>/api/diag</u></a></p>`; }
-  updateMeter();
-}
-async function loadMe(u) {
-  me = null;
-  if (u && !u.isAnonymous) { try { const d = await api('/me'); me = d.role ? d : null; } catch { /* غير مسجّل */ } }
-  authReady = true; render();
-}
-onAuthStateChanged(auth, loadMe);
-window.addEventListener('hashchange', render);
-
-function updateMeter() {
-  const form = $('#pf'); if (!form) return;
-  const fd = new FormData(form);
-  const L = { name: 'الاسم', price: 'السعر', stock: 'الكمية', category: 'التصنيف', brand: 'العلامة التجارية', description: 'الوصف', specs: 'المواصفات', keywords: 'الكلمات المفتاحية', returnPolicy: 'سياسة الاسترجاع' };
-  const miss = Object.keys(L).filter((k) => !String(fd.get(k) || '').trim()).map((k) => L[k]);
-  if (!form.image.files.length && !editing?.images?.length) miss.push('صورة المنتج');
-  const n = Object.keys(L).length + 1, pct = Math.round(((n - miss.length) / n) * 100), p = +fd.get('price'), d = +fd.get('discountPrice');
-  $('#meter').innerHTML = `<div>اكتمال البيانات: ${pct}٪ ${d && p ? `— نسبة الخصم ${Math.round((1 - d / p) * 100)}٪` : ''}</div><div style="background:#e2e8f0;border-radius:6px"><div style="height:8px;width:${pct}%;background:#14b8a6;border-radius:6px"></div></div>${miss.length ? `<small class="muted">ناقص قبل النشر: ${miss.join('، ')}</small>` : ''}`;
-}
-async function shrink(file, max = 700) { // تصغير الصورة في المتصفح وحفظها داخل Firestore (بدون Cloud Storage)
-  const bmp = await createImageBitmap(file), k = Math.min(1, max / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas');
-  cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
-  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
-  return cv.toDataURL('image/jpeg', 0.72);
-}
-const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok); } catch (e) { toast(e.message, true); } };
-const body = (fd) => ({ ...fd, keywords: (fd.keywords || '').split(',').map((k) => k.trim()).filter(Boolean) });
-
-document.addEventListener('input', (e) => { if (e.target.form?.id === 'pf') updateMeter(); });
-document.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const form = e.target, fd = Object.fromEntries(new FormData(form)), id = form.id;
-  if (id === 'sf') { f = { ...f, q: fd.q, category: fd.category ?? f.category }; goStore(); }
-  if (id === 'lf') run(async () => { await signInWithEmailAndPassword(auth, fd.email, fd.password); await loadMe(auth.currentUser); location.hash = home(); }, 'تم تسجيل الدخول');
-  if (id === 'rf') run(async () => {
-    await createUserWithEmailAndPassword(auth, fd.email, fd.password);
-    await api('/register', { method: 'POST', body: { name: fd.name, phone: fd.phone, role: fd.role, storeName: fd.storeName } });
-    await loadMe(auth.currentUser); location.hash = home();
-  }, 'تم إنشاء الحساب');
-  if (id === 'pf') run(async () => {
-    const images = [...(editing?.images || [])];
-    for (const file of [...form.image.files].slice(0, Math.max(0, 4 - images.length))) {
-      if (file.size > 12 * 1024 * 1024) throw new Error('إحدى الصور كبيرة جدًا');
-      images.push(await shrink(file));
-    }
-    const b = { ...body(fd), images: images.slice(0, 4), publish: !!fd.publish }; delete b.image;
-    const res = editing ? await api('/products/' + editing.id, { method: 'PUT', body: b }) : await api('/products', { method: 'POST', body: b });
-    editing = null; toast(res.status ? 'الحالة: ' + PST[res.status] : 'تم حفظ التعديلات'); location.hash = '#seller'; render();
-  });
-  if (id === 'cf') run(async () => {
-    const line = fd.line || fd.saved; if (!line) throw new Error('عنوان التوصيل مطلوب');
-    const items = Object.entries(cart).map(([productId, i]) => ({ productId, qty: i.qty }));
-    const res = await api('/orders', { method: 'POST', body: { items, couponCode: fd.couponCode, paymentMethod: fd.pay, address: { name: fd.name, phone: fd.phone, line } } });
-    cart = {}; saveCart(); toast(`تم تأكيد الطلب ${res.orderNumber} — ${money(res.total)}`); location.hash = '#orders'; render();
-  });
-  if (id === 'rvf') run(async () => { await api('/reviews', { method: 'POST', body: { productId: form.dataset.id, rating: fd.rating, comment: fd.comment } }); render(); }, 'شكرًا على تقييمك');
-  if (id === 'prf') run(async () => {
-    await api('/profile', { method: 'PUT', body: { name: fd.name, phone: fd.phone, storeName: fd.storeName, addresses: fd.addresses.split('\n').map((line) => ({ line: line.trim() })) } });
-    await loadMe(auth.currentUser);
-  }, 'تم حفظ البيانات');
-  if (id === 'catf') run(async () => { await api('/categories', { method: 'POST', body: fd }); render(); }, 'تمت الإضافة');
-  if (id === 'cpf') run(async () => { await api('/coupons', { method: 'POST', body: fd }); render(); }, 'تمت الإضافة');
-  if (id === 'mf') { $('#planbox').innerHTML = `<div class="box"><textarea id="plantxt" rows="22">${esc(makePlan(fd))}</textarea><button class="p" data-act="copyplan">نسخ الخطة</button> <button class="p" data-act="regen">إعادة إنشاء الاقتراحات</button> ${me?.role === 'seller' ? '<button class="p" data-act="saveplan">حفظ الخطة</button>' : ''}<div class="muted">يمكنك تعديل النص مباشرة قبل النسخ أو الحفظ.</div></div>`; }
+  if(act==='advance-order'){const order=data.orders.find((o)=>o.id===id);if(!order)return;const i=statusSteps.findIndex(([key])=>key===order.status);if(i>=0&&i<statusSteps.length-1){order.status=statusSteps[i+1][0];order.statusLabel=statusSteps[i+1][1];persist();render();toast('تم تحديث خطوة الطلب التجريبي.');}return;}
+  if(act==='copy-campaign'){try{await navigator.clipboard.writeText($('#campaign-text')?.value||'');toast('تم نسخ الخطة.');}catch{$('#campaign-text')?.select();toast('حدّد النص ثم انسخه يدويًا.');}return;}
+  if(act==='save-campaign'){if(!window.lastCampaignProduct)return;data.plans.push({id:uid(),name:window.lastCampaignProduct.name,text:$('#campaign-text')?.value||campaignText(window.lastCampaignProduct),savedAt:new Date().toISOString()});persist();toast('تم حفظ الخطة محليًا في هذه التجربة.');return;}
+  if(act==='reset-demo'){if(!confirm('مسح جميع بيانات التجربة المحلية من هذا المتصفح؟'))return;localStorage.removeItem(STORE_KEY);location.href=`${STORE}#store`;return;}
 });
-document.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-act]'); if (!b || b.tagName === 'SELECT') return;
-  const { act, id } = b.dataset;
-  if (b.tagName === 'A') e.preventDefault();
-  const again = (fn, ok) => run(async () => { await fn(); render(); }, ok);
-  if (act === 'logout') run(() => signOut(auth));
-  if (act === 'sort') { f.sort = id; render(); }
-  if (act === 'home') { f = { q: '', category: '', sort: 'new' }; goStore(); }
-  if (act === 'cat') { f.category = id; f.sort = 'new'; if (!id) f.q = ''; goStore(); }
-  if (act === 'img') $('#bigimg').src = id;
-  if (act === 'add' || act === 'buy') {
-    const p = catalog[id]; cart[id] = { name: p.name, price: p.discountPrice || p.price, list: p.price, qty: (cart[id]?.qty || 0) + 1 }; saveCart(); nav();
-    if (act === 'buy') location.hash = '#cart'; else toast('تمت الإضافة إلى السلة');
+document.addEventListener('input',(event)=>{if(event.target.form?.id==='product-form')updateCompletion(event.target.form);});
+document.addEventListener('change',async(event)=>{
+  if(event.target.id==='product-images'){
+    const files=[...event.target.files].slice(0,4);
+    if(files.some((file)=>!file.type.startsWith('image/'))){toast('اختر ملفات صور فقط.',true);return;}
+    if(files.some((file)=>file.size>12*1024*1024)){toast('حجم الصورة الواحدة يجب ألا يتجاوز 12 ميجابايت.',true);return;}
+    try{selectedFiles=await Promise.all(files.map(fileToSmallJpeg));$('#image-preview').innerHTML=selectedFiles.map((img)=>`<img src="${img}" alt="معاينة صورة المنتج">`).join('');updateCompletion($('#product-form'));}
+    catch(error){toast(error.message||'تعذّر تحميل الصور.',true);}return;
   }
-  if (act === 'inc') { cart[id].qty++; saveCart(); render(); }
-  if (act === 'dec') { if (--cart[id].qty < 1) delete cart[id]; saveCart(); render(); }
-  if (act === 'rm') { delete cart[id]; saveCart(); render(); }
-  if (act === 'fav') again(async () => { await api('/favorites/' + id, { method: 'POST' }); });
-  if (act === 'cancelo') again(() => api(`/orders/${id}/cancel`, { method: 'PATCH' }), 'تم إلغاء الطلب');
-  if (act === 'editp') { editing = mine[id]; location.hash = '#newproduct'; }
-  if (act === 'canceledit') { editing = null; location.hash = '#seller'; }
-  if (act === 'delp' && confirm('حذف المنتج نهائيًا؟')) again(() => api('/products/' + id, { method: 'DELETE' }), 'تم الحذف');
-  if (act === 'ok' || act === 'no') again(() => api(`/products/${id}/review`, { method: 'PATCH', body: { approve: act === 'ok' } }), 'تم');
-  if (act === 'seed') again(() => api('/admin/seed', { method: 'POST' }), 'تم تحميل البيانات التجريبية');
-  if (act === 'delcat') again(() => api('/categories/' + id, { method: 'DELETE' }));
-  if (act === 'delcp') again(() => api('/coupons/' + id, { method: 'DELETE' }));
-  if (act === 'delrv') again(() => api('/reviews/' + id, { method: 'DELETE' }));
-  if (act === 'block') again(() => api(`/admin/users/${id}/block`, { method: 'PATCH', body: { blocked: b.dataset.b === 'true' } }));
-  if (act === 'preview') {
-    const fd = Object.fromEntries(new FormData($('#pf'))), file = $('#pf').image.files[0];
-    $('#prev').innerHTML = '<h4>معاينة كما سيراها المشتري</h4>' + card({ id: 'preview', name: fd.name || 'اسم المنتج', category: fd.category, price: +fd.price || 0, discountPrice: +fd.discountPrice || null, stock: 1, images: [file ? URL.createObjectURL(file) : editing?.images?.[0] || ''] }).replace(/data-act="[a-z]+"/g, '');
+  if(event.target.matches('select[name="productId"]')){
+    const p=data.products.find((entry)=>entry.id===event.target.value);if(!p)return;const form=event.target.form;
+    for(const [key,value] of Object.entries({name:p.name,category:p.category,price:p.price,brand:p.brand||'',description:p.description||''}))if(form.elements[key])form.elements[key].value=value;
   }
-  if (act === 'copyplan') run(() => navigator.clipboard.writeText($('#plantxt').value), 'تم نسخ الخطة');
-  if (act === 'regen') { const fd = Object.fromEntries(new FormData($('#mf'))); $('#plantxt').value = makePlan(fd); }
-  if (act === 'saveplan') run(() => api('/marketing-plans', { method: 'POST', body: { productName: $('#mf').name.value, plan: $('#plantxt').value } }), 'تم حفظ الخطة');
 });
-document.addEventListener('change', (e) => {
-  const s = e.target.closest('select[data-act]'); if (!s) return;
-  if (s.dataset.act === 'status') run(() => api(`/orders/${s.dataset.id}/status`, { method: 'PATCH', body: { status: s.value } }), 'تم تحديث الحالة');
-  if (s.dataset.act === 'pickp' && mine[s.value]) { const p = mine[s.value], F = $('#mf'); ['name', 'category', 'price', 'brand', 'description'].forEach((k) => (F[k].value = p[k] ?? '')); }
-  if (e.target.form?.id === 'pf') updateMeter();
+document.addEventListener('dragover',(event)=>{if(event.target.closest('#upload-dropzone'))event.preventDefault();});
+document.addEventListener('drop',(event)=>{
+  if(!event.target.closest('#upload-dropzone'))return;
+  event.preventDefault();
+  const input=$('#product-images');
+  if(input&&event.dataTransfer?.files?.length){input.files=event.dataTransfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));}
 });
+document.addEventListener('submit',async(event)=>{
+  event.preventDefault();const form=event.target;
+  if(form.id==='search-form'){query=cleanText(new FormData(form).get('q'));render();$('#catalog')?.scrollIntoView({behavior:'smooth'});return;}
+  if(form.id==='product-form'){
+    const p=productValues(form);if(!p.name||!p.category||p.price<=0){toast('أكمل اسم المنتج والتصنيف والسعر بصورة صحيحة.',true);return;}
+    if(p.discountPrice>0&&p.discountPrice>=p.price){toast('سعر العرض يجب أن يكون أقل من السعر الأساسي.',true);return;}
+    const old=data.products.find((entry)=>entry.id===data.editingId)||null, previousProducts=data.products.slice(), previousCart=Object.fromEntries(Object.entries(data.cart).map(([key,value])=>[key,{...value}]));let images=old?.images||[];if(selectedFiles.length)images=[...images,...selectedFiles].slice(-4);
+    const saved={...old,...p,images,sellerId:data.user.id,emoji:old?.emoji||'📦',tone:old?.tone||random(['blue','mint','peach','lavender']),views:old?.views||0,sales:old?.sales||0,id:old?.id||`product-${uid()}`};
+    if(old)data.products=data.products.map((entry)=>entry.id===old.id?saved:entry);else data.products.unshift(saved);
+    if(data.cart[saved.id]){data.cart[saved.id].qty=Math.min(data.cart[saved.id].qty,Number(saved.stock)||0);if(!data.cart[saved.id].qty)delete data.cart[saved.id];else data.cart[saved.id].price=Number(saved.discountPrice)>0&&Number(saved.discountPrice)<Number(saved.price)?Number(saved.discountPrice):Number(saved.price);}
+    const previousEditingId=data.editingId;data.editingId='';if(!persist()){data.products=previousProducts;data.cart=previousCart;data.editingId=previousEditingId;return;}setPage('seller','/seller.html');return;
+  }
+  if(form.id==='checkout-form'){
+    if(data.user?.role!=='buyer'){setPage('login');return;}
+    const entries=Object.entries(data.cart),invalid=entries.find(([productId,item])=>{const p=data.products.find((entry)=>entry.id===productId);return !p||item.qty>Number(p.stock)||Number(p.stock)<1;});
+    if(invalid){toast('الكمية المطلوبة أكبر من المخزون المتاح؛ راجع سلتك.',true);return;}
+    const previousProducts=data.products.map((p)=>({...p})),previousOrders=data.orders.slice(),previousCart=Object.fromEntries(entries.map(([key,value])=>[key,{...value}]));
+    const items=entries.map(([productId,item])=>{const p=data.products.find((entry)=>entry.id===productId),sellerId=p.sellerId||`demo-seller-${productId}`;p.stock=Number(p.stock)-item.qty;p.sales=(p.sales||0)+item.qty;return{productId,name:p.name,qty:item.qty,price:item.price,sellerId};});
+    if(!items.length){toast('سلتك فارغة.',true);return;}
+    const number=`SQ-${Math.floor(100000+Math.random()*900000)}`;
+    const order={id:`order-${uid()}`,number,buyerId:data.user.id,buyerName:data.user.name,address:cleanText(new FormData(form).get('address')),items,total:items.reduce((sum,item)=>sum+item.qty*item.price,0),status:'new',statusLabel:statusSteps[0][1],createdAt:new Date().toISOString()};
+    data.orders.push(order);data.cart={};if(!persist()){data.products=previousProducts;data.orders=previousOrders;data.cart=previousCart;return;}setPage('orders');toast(`تم إنشاء الطلب التجريبي ${number}.`);return;
+  }
+  if(form.id==='profile-form'){const fd=new FormData(form);data.user.name=cleanText(fd.get('name'))||data.user.name;if(data.user.role==='seller')data.user.storeName=cleanText(fd.get('storeName'));else data.user.addresses=[cleanText(fd.get('address'))];data.accounts[data.user.role]=data.user;persist();render();toast('تم حفظ التعديلات محليًا.');return;}
+  if(form.id==='campaign-form'){
+    const fd=new FormData(form),selected=data.products.find((p)=>p.id===fd.get('productId'));
+    const p=selected?{...selected}:{name:cleanText(fd.get('name')),category:cleanText(fd.get('category')),price:Number(fd.get('price')||0),brand:cleanText(fd.get('brand')),description:cleanText(fd.get('description'))};
+    if(!p.name||!p.category){toast('أدخل اسم المنتج والفئة.',true);return;}window.lastCampaignProduct=p;renderCampaignResult(p);toast('جهزنا خطة مقترحة. راجعها وعدّلها قبل الاستخدام.');
+  }
+});
+if(!data.products.length)data.products=demoProducts;
+render();
